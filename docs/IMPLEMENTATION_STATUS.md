@@ -7,6 +7,7 @@ Last updated: 2026-09-28.
 - STM32 TX/RX roles are selected with `TxDebug` and `RxDebug` CMake presets.
 - STM32 TX emits one compact JSON range record after each successful DS-TWR exchange.
 - ESP32 forwards UART to TCP and TCP to UART; Wi-Fi settings are configured with `menuconfig`.
+- ESP32-S3 firmware builds successfully with ESP-IDF v5.5.5.
 - Python host supports demo, TCP, USB serial, and recorded-file replay sources.
 - Browser UI shows live range, expected distance, residual, rolling bias/spread, and stream health.
 - Direct-distance and 3D-position priors apply immediately and receive revision numbers.
@@ -33,7 +34,7 @@ Last updated: 2026-09-28.
 - Range telemetry is emitted only by the TX/initiator and currently has no radio diagnostics.
 - Device output still mixes debug text and JSON; the host safely ignores non-JSON lines.
 - The ESP32 accepts one unauthenticated TCP client and is suitable only for a trusted lab network.
+- The generated ESP32 `sdkconfig` still needs local Wi-Fi credentials before flashing.
 - Priors reset when the host restarts unless they were recorded in a session.
-- ESP32 compilation is not yet verified in this workspace because `idf.py` is unavailable in the current shell.
 
 Keep this file current when a feature becomes usable or a limitation is removed.
