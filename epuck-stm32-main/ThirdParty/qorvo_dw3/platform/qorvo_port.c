@@ -1152,6 +1152,13 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
         qorvo_log_printf("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
         qorvo_log_printf("  ds_twr.distance   = %.3f m\r\n", distance_m);
         qorvo_log_printf("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
+        qorvo_log_printf("{\"type\":\"range\",\"v\":1,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true}\r\n",
+                 g_link.board_id,
+                 g_link.peer_board_id,
+                 (unsigned long)g_link.current_exchange_counter,
+                 (unsigned long)HAL_GetTick(),
+                 distance_m,
+                 corrected_distance_m);
 
 #if QORVO_CAL_ANT_DELAY_MODE
         qorvo_stats_add(&g_link.cal_stats, corrected_distance_m);

@@ -28,6 +28,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
+set(UWB_BOARD_ID "2" CACHE STRING "UWB board identifier")
+set(UWB_BOARD_ROLE "RX" CACHE STRING "UWB board role: TX or RX")
+string(TOUPPER "${UWB_BOARD_ROLE}" UWB_BOARD_ROLE)
+if(NOT UWB_BOARD_ROLE STREQUAL "TX" AND NOT UWB_BOARD_ROLE STREQUAL "RX")
+    message(FATAL_ERROR "UWB_BOARD_ROLE must be TX or RX")
+endif()
+message("UWB board: id=${UWB_BOARD_ID}, role=${UWB_BOARD_ROLE}")
+
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
@@ -75,7 +83,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
+    UWB_BOARD_ID=${UWB_BOARD_ID}
+    UWB_BOARD_ROLE_${UWB_BOARD_ROLE}=1
 )
 
 # Remove wrong libob.a library dependency when using cpp files

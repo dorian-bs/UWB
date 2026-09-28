@@ -2,6 +2,8 @@
 
 The phases are ordered to make each new layer testable from recorded input before depending on the next hardware feature. Estimates are relative and should be adjusted after Phase 0 measurements.
 
+Implementation progress is maintained in `IMPLEMENTATION_STATUS.md`. The current code is a deliberately small vertical slice across Phases 0-3, not a full completion of those phases.
+
 ## Phase 0: Baseline and repository hygiene
 
 Goal: produce a repeatable baseline before changing protocol or timing.

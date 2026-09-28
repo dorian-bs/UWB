@@ -1,0 +1,16 @@
+menu "UWB bridge configuration"
+
+config UWB_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+
+config UWB_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+
+config UWB_TCP_PORT
+    int "TCP bridge port"
+    range 1024 65535
+    default 3333
+
+endmenu

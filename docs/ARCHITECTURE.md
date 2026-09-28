@@ -1,6 +1,6 @@
 # Target Architecture and Data Contract
 
-Status: proposed baseline. Record material changes here before implementation.
+Status: target architecture. The implemented semester-scale subset is tracked in `IMPLEMENTATION_STATUS.md`.
 
 ## Design principles
 
@@ -103,6 +103,8 @@ The first host parser may extract `ds_twr.distance` and `ds_twr.corrected` from 
 ### Stable protocol
 
 Use UTF-8 newline-delimited JSON (NDJSON) at the host boundary. At expected research rates this is well within 115200-baud capacity, easy to record, and easy to inspect. Each line is one complete message. Unknown fields are ignored; unknown major schema versions are rejected.
+
+The current minimal implementation uses compact version-1 keys (`v`, `board`, `peer`, `seq`, `time_ms`, `raw_m`, and `corrected_m`). The richer message below remains a future-compatible target once device identity and diagnostics are added.
 
 Minimum range message:
 

@@ -17,11 +17,11 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
 
-#define WIFI_SSID       "disal-robots"
-#define WIFI_PASS       "dis@l1234"
-
-#define TCP_PORT        3333
+#define WIFI_SSID       CONFIG_UWB_WIFI_SSID
+#define WIFI_PASS       CONFIG_UWB_WIFI_PASSWORD
+#define TCP_PORT        CONFIG_UWB_TCP_PORT
 
 #define UART_PORT       UART_NUM_1
 #define UART_TX_PIN     43
@@ -171,19 +171,22 @@ static void tcp_server_task(void *pvParameters)
         }
         client_sock = sock;
 
-        // Optional welcome message
         const char *msg = "ESP32 UART->TCP bridge connected\r\n";
         send(client_sock, msg, strlen(msg), 0);
 
-        // Keep this task alive until client disconnects
-        char dummy[32];
+        uint8_t data[128];
         while (1) {
-            int len = recv(client_sock, dummy, sizeof(dummy), MSG_DONTWAIT);
+            int len = recv(client_sock, data, sizeof(data), MSG_DONTWAIT);
             if (len == 0) {
                 ESP_LOGI(TAG, "Client disconnected");
                 close(client_sock);
                 client_sock = -1;
                 break;
+            } else if (len > 0) {
+                int written = uart_write_bytes(UART_PORT, data, len);
+                if (written != len) {
+                    ESP_LOGW(TAG, "UART write incomplete: %d/%d bytes", written, len);
+                }
             } else if (len < 0) {
                 if (errno == EWOULDBLOCK || errno == EAGAIN) {
                     vTaskDelay(pdMS_TO_TICKS(100));
@@ -210,17 +213,8 @@ static void uart_reader_task(void *pvParameters)
 
             ESP_LOGI(TAG, "UART RX (%d bytes): %s", len, (char *)data);
 
-            // 🔵 Blink LED on activity
-            gpio_set_level(LED_GPIO, 1);  // ON
+            gpio_set_level(LED_GPIO, 1);
 
-            // Keep your logic
-            if (strstr((char *)data, "STM32 LED off") != NULL) {
-                ESP_LOGI(TAG, "ESP LED ON (command)");
-            } else if (strstr((char *)data, "STM32 LED on") != NULL) {
-                ESP_LOGI(TAG, "ESP LED OFF (command)");
-            }
-
-            // Send over TCP
             if (client_sock >= 0) {
                 int sent = send(client_sock, data, len, 0);
                 if (sent < 0) {
@@ -230,9 +224,8 @@ static void uart_reader_task(void *pvParameters)
                 }
             }
 
-            // 🔵 Short blink duration
             vTaskDelay(pdMS_TO_TICKS(50));
-            gpio_set_level(LED_GPIO, 0);  // OFF
+            gpio_set_level(LED_GPIO, 0);
         }
     }
 }

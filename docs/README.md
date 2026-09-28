@@ -10,6 +10,7 @@ This directory is the working source of truth for the UWB ranging and noise-mode
 | [CODEBASE_LAYOUT.md](CODEBASE_LAYOUT.md) | Verified description of the current STM32 and ESP32 code |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Target system, UI behavior, telemetry schema, and dynamic-prior semantics |
 | [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) | Ordered implementation phases and acceptance criteria |
+| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | Short record of completed and remaining work |
 | [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md) | Data-collection protocol, baselines, models, and evaluation rules |
 | [LITERATURE.md](LITERATURE.md) | Supervisor-provided references and reading priorities |
 

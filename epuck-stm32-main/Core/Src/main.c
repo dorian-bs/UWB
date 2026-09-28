@@ -44,13 +44,17 @@
 #define DWM3000_DEV_ID_REG      0x00U
 #define DWM3000_EXPECTED_DEV_ID 0xDECA0302UL
 
-// For the transmitter board, use:
-// #define BOARD_ID   1U
-// #define BOARD_ROLE QORVO_ROLE_TX
+#ifndef UWB_BOARD_ID
+#define UWB_BOARD_ID 2U
+#endif
 
-// For the receiver board, use:
-#define BOARD_ID   2U
+#define BOARD_ID UWB_BOARD_ID
+
+#if defined(UWB_BOARD_ROLE_TX)
+#define BOARD_ROLE QORVO_ROLE_TX
+#else
 #define BOARD_ROLE QORVO_ROLE_RX
+#endif
 
 /* USER CODE END PD */
 
