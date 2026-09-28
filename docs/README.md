@@ -2,6 +2,8 @@
 
 This directory is the working source of truth for the UWB ranging and noise-modeling project. It separates verified behavior in the current firmware from proposed integration work.
 
+For installation and first-run commands, start with the repository [README](../README.md).
+
 ## Document map
 
 | Document | Purpose |

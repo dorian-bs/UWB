@@ -13,6 +13,7 @@ Last updated: 2026-09-28.
 - Direct-distance and 3D-position priors apply immediately and receive revision numbers.
 - Sessions record telemetry, prior changes, and a small manifest under `data/sessions/`.
 - Core parser, prior, residual, and recorder tests are present.
+- A repeatable macOS bootstrap and top-level `make` commands install, check, build, test, run, and flash the project.
 
 ## Next essentials
 

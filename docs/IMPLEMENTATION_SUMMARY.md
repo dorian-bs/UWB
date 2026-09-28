@@ -74,6 +74,7 @@ A small Python/FastAPI application was added under `host/`:
 - Added ignored storage under `data/sessions/` for local recordings.
 - Added a project Python virtual environment and declared dependencies in `host/pyproject.toml`.
 - Installed a user-local `idf.py` launcher at `~/.local/bin/idf.py`.
+- Added an idempotent macOS bootstrap, environment checker, firmware builder, dashboard runner, and top-level `make` commands.
 
 ## Current data flow
 

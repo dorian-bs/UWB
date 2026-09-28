@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # Resolve STM32 GNU Arm toolchain location.
 # Priority:
 # 1) STM32_TOOLCHAIN_BIN environment variable
-# 2) Common STM32CubeIDE plugin path
-# 3) Newest matching STM32CubeIDE plugin path
+# 2) Toolchain installed by scripts/setup_macos.sh
+# 3) Common STM32CubeIDE plugin path
+# 4) Newest matching STM32CubeIDE plugin path
 
 if [[ -n "${STM32_TOOLCHAIN_BIN:-}" && -x "${STM32_TOOLCHAIN_BIN}/arm-none-eabi-gcc" ]]; then
   TOOLCHAIN_BIN="${STM32_TOOLCHAIN_BIN}"
+elif [[ -x "${HOME}/.local/arm-gnu-toolchain-14.3.rel1-darwin-arm64-arm-none-eabi/bin/arm-none-eabi-gcc" ]]; then
+  TOOLCHAIN_BIN="${HOME}/.local/arm-gnu-toolchain-14.3.rel1-darwin-arm64-arm-none-eabi/bin"
 else
   DEFAULT_BIN="/Applications/STM32CubeIDE.app/Contents/Eclipse/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.macosaarch64_1.0.0.202602081740/tools/bin"
 
@@ -28,7 +30,8 @@ fi
 if [[ -z "${TOOLCHAIN_BIN:-}" ]]; then
   cat <<'EOF' >&2
 STM32 toolchain not found.
-Install STM32CubeIDE or set STM32_TOOLCHAIN_BIN to a folder containing arm-none-eabi-gcc.
+Run the repository setup script, install STM32CubeIDE, or set STM32_TOOLCHAIN_BIN
+to a complete Arm GNU Toolchain folder containing arm-none-eabi-gcc and Newlib.
 Example:
   export STM32_TOOLCHAIN_BIN="/Applications/STM32CubeIDE.app/Contents/Eclipse/plugins/.../tools/bin"
 EOF
