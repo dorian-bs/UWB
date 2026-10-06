@@ -22,6 +22,7 @@ packages=()
 command -v cmake >/dev/null 2>&1 || packages+=(cmake)
 command -v ninja >/dev/null 2>&1 || packages+=(ninja)
 command -v openocd >/dev/null 2>&1 || packages+=(open-ocd)
+command -v dfu-util >/dev/null 2>&1 || packages+=(dfu-util)
 brew list --versions python@3.13 >/dev/null 2>&1 || packages+=(python@3.13)
 
 if (( ${#packages[@]} > 0 )); then

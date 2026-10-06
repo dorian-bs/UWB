@@ -16,6 +16,7 @@ check_command() {
 check_command cmake
 check_command ninja
 check_command openocd
+check_command dfu-util
 
 if source "${ROOT_DIR}/epuck-stm32-main/scripts/stm32_toolchain_env.sh" >/dev/null 2>&1; then
   printf "[ok] %-22s %s\n" "STM32 toolchain" "$(command -v arm-none-eabi-gcc)"

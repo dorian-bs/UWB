@@ -1,4 +1,4 @@
-# UWB Ranging Project
+ # UWB Ranging Project
 
 Semester-project setup for DW3000 ranging, an STM32/ESP32 link, and a small Python live dashboard.
 
@@ -18,7 +18,7 @@ make test
 
 The setup is safe to rerun. It installs:
 
-- CMake, Ninja, OpenOCD, and Python 3.13 through Homebrew when missing.
+- CMake, Ninja, OpenOCD, dfu-util, and Python 3.13 through Homebrew when missing.
 - Arm GNU Toolchain 14.3.rel1 under `~/.local/`.
 - ESP-IDF v5.5.5 and ESP32-S3 tools under `~/esp/` and `~/.espressif/`.
 - Host Python dependencies in the repository `.venv/`.
@@ -48,6 +48,12 @@ Build both STM32 images with `make build`. Then connect the appropriate board an
 make stm-tx-flash
 make stm-rx-flash
 ```
+if using a ST-link, or:
+```bash
+make stm-tx-dfu-flash
+make stm-rx-dfu-flash
+```
+if using USB-C.
 
 Only one STM32 should be connected when running each flash command. The TX board computes and publishes range measurements.
 
@@ -56,5 +62,75 @@ Start the dashboard with the ESP32 IP address:
 ```bash
 bash scripts/run_dashboard.sh --source tcp --tcp-host ESP32_IP
 ```
+
+## Common runtime commands
+
+Use these commands during bring-up and debugging.
+
+### List connected USB serial ports
+
+```bash
+ls /dev/tty.usbmodem*
+ls /dev/cu.usbmodem*
+```
+
+- Shows currently connected USB CDC devices (STM32 USB CDC, ESP32 USB-Serial/JTAG, etc.).
+- On macOS, `/dev/cu.*` is typically preferred for active terminal/monitor connections.
+
+### Attach ESP-IDF monitor without reflashing
+
+```bash
+bash scripts/esp32.sh -p /dev/cu.usbmodemXXXX monitor
+```
+
+- Opens the serial monitor for an already flashed ESP32.
+- Useful to read logs such as `Got IP: ...` without writing new firmware.
+
+If multiple ESP-class devices are connected, always pass `-p` explicitly.
+
+Optional convenience variable:
+
+```bash
+export ESPPORT=/dev/cu.usbmodemXXXX
+bash scripts/esp32.sh monitor
+```
+
+- Uses `ESPPORT` as the default monitor/flash port in ESP-IDF tooling.
+
+### Check TCP bridge reachability from your Mac
+
+```bash
+nc 192.168.x.xxx 3333
+```
+
+- Opens a raw TCP connection to the ESP32 bridge.
+- Expected first line on success:
+
+```text
+ESP32 UART->TCP bridge connected
+```
+
+- Data from STM32 UART should appear in this terminal while connected.
+
+### Run dashboard from serial source (direct STM32 USB)
+
+```bash
+bash scripts/run_dashboard.sh --source serial --serial-port /dev/tty.usbmodemXXXX
+```
+
+- Reads telemetry directly from STM32 USB CDC instead of ESP32 TCP.
+
+### Run dashboard from ESP32 TCP source
+
+```bash
+bash scripts/run_dashboard.sh --source tcp --tcp-host 192.168.x.xxx --tcp-port 3333
+```
+
+- Reads telemetry through the ESP32 UART-to-TCP bridge.
+
+### Useful monitor controls
+
+- `Ctrl+]`: quit `idf.py monitor`.
+- `Ctrl+C`: stop `nc` or most foreground terminal commands.
 
 For implementation progress and limitations, see [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
