@@ -111,12 +111,18 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
     return sample
 
 
+def is_json_like_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("{") and len(stripped) <= 2048
+
+
 class LabState:
     def __init__(self, history_size: int = 300, rolling_size: int = 20) -> None:
         self.samples: deque[dict[str, Any]] = deque(maxlen=history_size)
         self.residuals: deque[float] = deque(maxlen=rolling_size)
         self.priors: list[Prior] = []
         self.total_samples = 0
+        self.ignored_lines = 0
         self.malformed_lines = 0
         self.sequence_gaps = 0
         self.last_sequence: int | None = None
@@ -134,8 +140,12 @@ class LabState:
     def add_line(self, line: str) -> dict[str, Any] | None:
         sample = parse_range_line(line)
         if sample is None:
-            if line.strip():
+            if not line.strip():
+                return None
+            if is_json_like_line(line):
                 self.malformed_lines += 1
+            else:
+                self.ignored_lines += 1
             return None
 
         sequence = sample["seq"]

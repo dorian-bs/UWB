@@ -63,6 +63,7 @@ class Runtime:
             "connected": self.connected,
             "last_error": self.last_error,
             "total_samples": self.state.total_samples,
+            "ignored_lines": self.state.ignored_lines,
             "malformed_lines": self.state.malformed_lines,
             "sequence_gaps": self.state.sequence_gaps,
             "recording": self.recorder.active,

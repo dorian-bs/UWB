@@ -113,6 +113,7 @@ async function refreshStatus() {
     byId("source-label").textContent = status.source;
     byId("sample-count").textContent = status.total_samples;
     byId("gap-count").textContent = status.sequence_gaps;
+    byId("ignored-count").textContent = status.ignored_lines;
     byId("malformed-count").textContent = status.malformed_lines;
     byId("prior-revision").textContent = status.prior ? `Revision ${status.prior.revision}` : "No prior";
     recording = status.recording;

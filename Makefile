@@ -1,4 +1,4 @@
-.PHONY: help setup check build test demo esp-config esp-build esp-flash stm-tx-flash stm-rx-flash
+.PHONY: help setup check build test demo esp-config esp-build esp-flash stm-tx-flash stm-rx-flash stm-tx-dfu-flash stm-rx-dfu-flash
 
 help:
 	@echo "make setup          Install development tools and Python dependencies"
@@ -10,6 +10,8 @@ help:
 	@echo "make esp-flash      Flash and monitor the connected ESP32"
 	@echo "make stm-tx-flash   Flash the connected STM32 as initiator"
 	@echo "make stm-rx-flash   Flash the connected STM32 as responder"
+	@echo "make stm-tx-dfu-flash Flash STM32 TX over USB DFU bootloader"
+	@echo "make stm-rx-dfu-flash Flash STM32 RX over USB DFU bootloader"
 
 setup:
 	bash scripts/setup_macos.sh
@@ -40,3 +42,9 @@ stm-tx-flash:
 
 stm-rx-flash:
 	cd epuck-stm32-main && bash scripts/stm32_flash.sh RxDebug
+
+stm-tx-dfu-flash:
+	cd epuck-stm32-main && bash scripts/stm32_flash_usb_dfu.sh TxDebug
+
+stm-rx-dfu-flash:
+	cd epuck-stm32-main && bash scripts/stm32_flash_usb_dfu.sh RxDebug
