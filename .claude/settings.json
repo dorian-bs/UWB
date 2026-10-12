@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make check:*)",
+      "Bash(make test:*)",
+      "Bash(make lint:*)",
+      "Bash(make fmt:*)",
+      "Bash(make verify:*)",
+      "Bash(make help:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(.venv/bin/python -m ruff:*)",
+      "Bash(.venv/bin/python -c:*)",
+      "Bash(bash scripts/check_setup.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git branch:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(curl -s http://127.0.0.1:8000/*)",
+      "Bash(ls /dev/tty.*)",
+      "Bash(ls /dev/cu.*)"
+    ],
+    "ask": [
+      "Bash(make build:*)",
+      "Bash(make setup:*)",
+      "Bash(make esp-*)",
+      "Bash(make stm-*)",
+      "Bash(bash scripts/setup_macos.sh:*)",
+      "Bash(bash scripts/build_firmware.sh:*)",
+      "Bash(bash scripts/esp32.sh:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [
+      "Read(./.venv/**)",
+      "Read(./archive/**)",
+      "Read(./epuck-stm32-main/build/**)",
+      "Read(./epuck-esp32-main/build/**)",
+      "Read(./**/sdkconfig)"
+    ]
+  }
+}

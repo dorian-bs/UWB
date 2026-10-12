@@ -5,4 +5,15 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
 data/sessions/
+
+# macOS
+.DS_Store
+
+# Local, machine-specific agent/editor settings
+.claude/settings.local.json
+
+# Lab-specific addresses, serial paths, and credentials (template: LAB_NOTES.example.md)
+LAB_NOTES.md

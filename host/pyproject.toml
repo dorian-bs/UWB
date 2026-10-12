@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28,<1", "pytest>=8,<9"]
+dev = ["httpx>=0.28,<1", "pytest>=8,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
 uwb-lab = "uwb_lab.__main__:main"
@@ -25,3 +25,14 @@ uwb_lab = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+# Small university project: catch real mistakes, do not enforce style dogma.
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "B008",  # FastAPI dependency defaults are idiomatic calls in argument position
+]

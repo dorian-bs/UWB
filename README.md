@@ -2,6 +2,11 @@
 
 Semester-project setup for DW3000 ranging, an STM32/ESP32 link, and a small Python live dashboard.
 
+Working on this with an AI coding agent? Point it at [CLAUDE.md](CLAUDE.md) — it is the
+orientation doc that explains the layout, the telemetry contract, and what to run without hardware.
+
+Run `make help` to see every command, grouped by whether it needs hardware.
+
 ## New Mac setup
 
 Requirements: macOS on Apple Silicon and [Homebrew](https://brew.sh).
@@ -32,6 +37,18 @@ make demo
 ```
 
 Open <http://127.0.0.1:8000>. This uses generated data and requires no hardware.
+
+To see the dashboard against a recorded-looking session, including a simulated NLOS
+obstruction, use `make replay`.
+
+## Change host code
+
+```bash
+make verify   # ruff lint/format check + all host tests
+make fmt      # auto-format and auto-fix
+```
+
+`make verify` needs no boards and takes under a second. Run it before committing host changes.
 
 ## Configure and flash hardware
 
@@ -67,6 +84,9 @@ bash scripts/run_dashboard.sh --source tcp --tcp-host ESP32_IP
 
 Use these commands during bring-up and debugging.
 
+Addresses and serial paths differ per machine and per lab session, so they are not recorded here.
+Keep yours in `LAB_NOTES.md` — copy `LAB_NOTES.example.md` to start one. That file is gitignored.
+
 ### List connected USB serial ports
 
 ```bash
@@ -96,6 +116,8 @@ bash scripts/esp32.sh monitor
 ```
 
 - Uses `ESPPORT` as the default monitor/flash port in ESP-IDF tooling.
+- The monitor prints `Got IP: ...` at boot. That is where the bridge address comes from; note it
+  in `LAB_NOTES.md` rather than here, since DHCP reassigns it.
 
 ### Check TCP bridge reachability from your Mac
 

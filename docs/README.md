@@ -3,11 +3,13 @@
 This directory is the working source of truth for the UWB ranging and noise-modeling project. It separates verified behavior in the current firmware from proposed integration work.
 
 For installation and first-run commands, start with the repository [README](../README.md).
+For an orientation brief aimed at AI coding agents, see [CLAUDE.md](../CLAUDE.md).
 
 ## Document map
 
 | Document | Purpose |
 | --- | --- |
+| [CLAUDE.md](../CLAUDE.md) | Agent brief: layout, telemetry contract, hardware-free workflow, conventions |
 | [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | Research goals, scope, terminology, and success criteria |
 | [CODEBASE_LAYOUT.md](CODEBASE_LAYOUT.md) | Verified description of the current STM32 and ESP32 code |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Target system, UI behavior, telemetry schema, and dynamic-prior semantics |

@@ -5,16 +5,16 @@ import json
 import os
 import random
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .core import LabState, SessionRecorder
-
 
 PACKAGE_DIR = Path(__file__).parent
 DATA_DIR = Path(os.getenv("UWB_DATA_DIR", PACKAGE_DIR.parent.parent / "data" / "sessions"))
@@ -148,7 +148,17 @@ async def replay_source() -> AsyncIterator[str]:
                     message = json.loads(line)
                     compact = {
                         key: message[key]
-                        for key in ("type", "v", "board", "peer", "seq", "time_ms", "raw_m", "corrected_m", "valid")
+                        for key in (
+                            "type",
+                            "v",
+                            "board",
+                            "peer",
+                            "seq",
+                            "time_ms",
+                            "raw_m",
+                            "corrected_m",
+                            "valid",
+                        )
                     }
                     yield json.dumps(compact)
                     await asyncio.sleep(float(os.getenv("UWB_REPLAY_INTERVAL", "0.2")))

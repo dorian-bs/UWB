@@ -5,7 +5,6 @@ from pathlib import Path
 
 from uwb_lab.core import LabState, SessionRecorder, make_prior, parse_range_line
 
-
 VALID_LINE = json.dumps(
     {
         "type": "range",
