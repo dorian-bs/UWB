@@ -30,14 +30,23 @@
         <div><span>Rolling spread</span><strong id="spread-value">--</strong><small>m</small></div>
       </div>
 
-      <section class="display-controls" aria-label="Plot settings">
+      <section class="display-controls" aria-label="Shared display settings">
         <div class="toolbar">
           <label>Last N samples<input id="display-count" type="number" min="10" max="2000" step="1" value="180"></label>
           <label>Height (px)<input id="plot-height" type="number" min="180" max="600" step="10" value="300"></label>
           <label>Draw<select id="plot-style"><option value="lines">Lines</option><option value="points">Points</option><option value="both">Lines + points</option></select></label>
           <button id="pause-view" type="button" aria-pressed="false">Pause view</button>
           <button id="reset-display" type="button">Reset display</button>
+          <label class="check"><input id="secondary-plot" type="checkbox">Show Plot 2</label>
         </div>
+        <p id="settings-error" class="error" role="alert" hidden></p>
+      </section>
+      <div class="plot-block">
+        <div class="plot-heading">
+          <h2>Plot 1</h2>
+          <span id="view-state" role="status">Live view</span>
+        </div>
+        <section id="plot-controls" class="plot-controls" aria-label="Plot 1 settings">
         <fieldset id="series-controls" class="series-controls">
           <legend>Visible series (m): distance on left; residual, bias and spread on right</legend>
           <label class="raw"><input type="checkbox" value="raw_m">Raw</label>
@@ -48,7 +57,7 @@
           <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
         </fieldset>
         <details class="axis-settings">
-          <summary>Axis limits and additional plot</summary>
+          <summary>Plot 1 axis limits</summary>
           <div class="axis-grid">
             <fieldset><legend>Distance / left axis (m)</legend>
               <label class="check"><input id="distance-auto" type="checkbox" checked>Auto scale</label>
@@ -61,25 +70,46 @@
               <label>Maximum<input id="error-max" type="number" step="any" value="0.1" disabled></label>
             </fieldset>
           </div>
-          <label class="check"><input id="secondary-plot" type="checkbox">Show a separate error plot (selected residual, bias and spread)</label>
         </details>
-        <p id="settings-error" class="error" role="alert" hidden></p>
-      </section>
-      <div class="plot-block">
-        <div class="plot-heading">
-          <h2>Measurements</h2>
-          <span id="view-state" role="status">Live view</span>
-        </div>
-        <canvas id="distance-chart" aria-label="Measurements: distance on left axis, error on right axis"></canvas>
+        <p id="plot-error" class="error" role="alert" hidden></p>
+        </section>
+        <canvas id="distance-chart" aria-label="Plot 1: distance on left axis, error on right axis"></canvas>
         <p id="window-label" class="plot-note"></p>
       </div>
 
       <div id="secondary-block" class="plot-block" hidden>
         <div class="plot-heading">
-          <h2>Error detail</h2>
-          <span class="plot-note">Same sample window and error scale</span>
+          <h2>Plot 2</h2>
+          <span class="plot-note">Shared sample window; independent traces and axes</span>
         </div>
-        <canvas id="residual-chart" aria-label="Selected residual, rolling bias and spread; error axis in metres"></canvas>
+        <section id="second-plot-controls" class="plot-controls" aria-label="Plot 2 settings">
+          <fieldset id="second-series-controls" class="series-controls">
+            <legend>Visible series (m): distance on left; residual, bias and spread on right</legend>
+            <label class="raw"><input type="checkbox" value="raw_m">Raw</label>
+            <label class="corrected"><input type="checkbox" value="corrected_m">Corrected</label>
+            <label class="expected"><input type="checkbox" value="expected_m">Expected</label>
+            <label class="residual"><input type="checkbox" value="residual_m" checked>Residual</label>
+            <label class="bias"><input type="checkbox" value="rolling_bias_m">Rolling bias</label>
+            <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
+          </fieldset>
+          <details class="axis-settings">
+            <summary>Plot 2 axis limits</summary>
+            <div class="axis-grid">
+              <fieldset><legend>Distance / left axis (m)</legend>
+                <label class="check"><input id="second-distance-auto" type="checkbox" checked>Auto scale</label>
+                <label>Minimum<input id="second-distance-min" type="number" step="any" value="0" disabled></label>
+                <label>Maximum<input id="second-distance-max" type="number" step="any" value="4" disabled></label>
+              </fieldset>
+              <fieldset><legend>Error / right axis (m)</legend>
+                <label class="check"><input id="second-error-auto" type="checkbox" checked>Auto scale (includes zero)</label>
+                <label>Minimum<input id="second-error-min" type="number" step="any" value="-0.1" disabled></label>
+                <label>Maximum<input id="second-error-max" type="number" step="any" value="0.1" disabled></label>
+              </fieldset>
+            </div>
+          </details>
+          <p id="second-plot-error" class="error" role="alert" hidden></p>
+        </section>
+        <canvas id="residual-chart" aria-label="Plot 2: distance on left axis, error on right axis"></canvas>
       </div>
     </section>
 

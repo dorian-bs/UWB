@@ -11,6 +11,11 @@ const DEFAULTS = {
   series: ["corrected_m", "expected_m", "residual_m"],
   distance: { auto: true, min: 0, max: 4 },
   error: { auto: true, min: -0.1, max: 0.1 },
+  secondPlot: {
+    series: ["residual_m"],
+    distance: { auto: true, min: 0, max: 4 },
+    error: { auto: true, min: -0.1, max: 0.1 },
+  },
 };
 const STORAGE_KEY = "uwb-lab-display-v1";
 
@@ -18,20 +23,33 @@ function validatePreferences(value) {
   if (!value || !Number.isInteger(value.count) || value.count < 10 || value.count > 2000 ||
       !Number.isInteger(value.height) || value.height < 180 || value.height > 600 ||
       !["lines", "points", "both"].includes(value.style) ||
-      typeof value.secondary !== "boolean" || typeof value.controls !== "boolean" ||
-      !Array.isArray(value.series) || value.series.some((key) => !SERIES.some((s) => s.key === key))) {
+      typeof value.secondary !== "boolean" || typeof value.controls !== "boolean") {
     throw new Error("Invalid display settings. Samples: 10-2000; height: 180-600 px.");
+  }
+  return {
+    count: value.count, height: value.height, style: value.style,
+    secondary: value.secondary, controls: value.controls,
+    ...validatePlotPreferences(value, "Plot 1"),
+    // Preferences saved before independent plots have no secondPlot field.
+    secondPlot: validatePlotPreferences(
+      value.secondPlot === undefined ? DEFAULTS.secondPlot : value.secondPlot, "Plot 2",
+    ),
+  };
+}
+
+function validatePlotPreferences(value, label) {
+  if (!value || !Array.isArray(value.series) || value.series.some((key) => !SERIES.some((s) => s.key === key))) {
+    throw new Error(`${label}: invalid trace selection.`);
   }
   for (const family of ["distance", "error"]) {
     const axis = value[family];
     if (!axis || typeof axis.auto !== "boolean" || !Number.isFinite(axis.min) ||
         !Number.isFinite(axis.max) || axis.min >= axis.max || !Number.isFinite(axis.max - axis.min)) {
-      throw new Error(`${family === "distance" ? "Distance" : "Error"} limits must be finite, with minimum below maximum.`);
+      throw new Error(`${label}: ${family} limits must be finite, with minimum below maximum.`);
     }
   }
   return {
-    count: value.count, height: value.height, style: value.style,
-    secondary: value.secondary, controls: value.controls, series: [...new Set(value.series)],
+    series: [...new Set(value.series)],
     distance: { ...value.distance }, error: { ...value.error },
   };
 }
@@ -45,6 +63,18 @@ function axisBounds(values, axis, includeZero = false) {
   if (includeZero) { min = Math.min(min, 0); max = Math.max(max, 0); }
   const margin = Math.max((max - min) * 0.1, includeZero ? 0.01 : 0.03);
   return [min - margin, max + margin];
+}
+
+function getPlotData(samples, settings) {
+  const selected = SERIES.filter((s) => settings.series.includes(s.key));
+  const bounds = {};
+  for (const family of ["distance", "error"]) {
+    bounds[family] = axisBounds(
+      selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
+      settings[family], family === "error",
+    );
+  }
+  return { selected, bounds };
 }
 
 function createViewState(limit = 2000) {
@@ -87,14 +117,16 @@ function startDashboard() {
     byId("plot-height").value = preferences.height;
     byId("plot-style").value = preferences.style;
     byId("secondary-plot").checked = preferences.secondary;
-    document.querySelectorAll("#series-controls input").forEach((input) => {
-      input.checked = preferences.series.includes(input.value);
-    });
-    for (const family of ["distance", "error"]) {
-      byId(`${family}-auto`).checked = preferences[family].auto;
-      for (const bound of ["min", "max"]) {
-        byId(`${family}-${bound}`).value = preferences[family][bound];
-        byId(`${family}-${bound}`).disabled = preferences[family].auto;
+    for (const [prefix, settings] of [["", preferences], ["second-", preferences.secondPlot]]) {
+      document.querySelectorAll(`#${prefix}series-controls input`).forEach((input) => {
+        input.checked = settings.series.includes(input.value);
+      });
+      for (const family of ["distance", "error"]) {
+        byId(`${prefix}${family}-auto`).checked = settings[family].auto;
+        for (const bound of ["min", "max"]) {
+          byId(`${prefix}${family}-${bound}`).value = settings[family][bound];
+          byId(`${prefix}${family}-${bound}`).disabled = settings[family].auto;
+        }
       }
     }
     byId("experiment-controls").hidden = !preferences.controls;
@@ -107,17 +139,7 @@ function startDashboard() {
       ...preferences, count: Number(byId("display-count").value),
       height: Number(byId("plot-height").value), style: byId("plot-style").value,
       secondary: byId("secondary-plot").checked,
-      series: [...document.querySelectorAll("#series-controls input:checked")].map((input) => input.value),
     };
-    for (const family of ["distance", "error"]) {
-      const auto = byId(`${family}-auto`).checked;
-      candidate[family] = { auto };
-      for (const bound of ["min", "max"]) {
-        const input = byId(`${family}-${bound}`);
-        input.disabled = auto;
-        candidate[family][bound] = auto ? preferences[family][bound] : input.value === "" ? NaN : Number(input.value);
-      }
-    }
     try {
       preferences = validatePreferences(candidate);
       showError("settings-error", "");
@@ -125,8 +147,31 @@ function startDashboard() {
       drawAll();
     } catch (error) { showError("settings-error", error.message); }
   }
+  function updatePlotPreferences(prefix) {
+    const previous = prefix ? preferences.secondPlot : preferences;
+    const candidate = {
+      series: [...document.querySelectorAll(`#${prefix}series-controls input:checked`)].map((input) => input.value),
+    };
+    for (const family of ["distance", "error"]) {
+      const auto = byId(`${prefix}${family}-auto`).checked;
+      candidate[family] = { auto };
+      for (const bound of ["min", "max"]) {
+        const input = byId(`${prefix}${family}-${bound}`);
+        input.disabled = auto;
+        candidate[family][bound] = auto ? previous[family][bound] : input.value === "" ? NaN : Number(input.value);
+      }
+    }
+    try {
+      const plot = validatePlotPreferences(candidate, prefix ? "Plot 2" : "Plot 1");
+      preferences = prefix ? { ...preferences, secondPlot: plot } : { ...preferences, ...plot };
+      showError(`${prefix}plot-error`, "");
+      savePreferences();
+      drawAll();
+    } catch (error) { showError(`${prefix}plot-error`, error.message); }
+  }
 
-  function drawChart(canvas, samples, selected, errorOnly = false) {
+  function drawChart(canvas, samples, settings) {
+    const { selected, bounds } = getPlotData(samples, settings);
     const box = canvas.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.floor(box.width * scale));
@@ -139,13 +184,6 @@ function startDashboard() {
     const plotHeight = height - pad.top - pad.bottom;
     const hasDistance = selected.some((s) => s.family === "distance");
     const hasError = selected.some((s) => s.family === "error");
-    const bounds = {};
-    for (const family of ["distance", "error"]) {
-      bounds[family] = axisBounds(
-        selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
-        preferences[family], family === "error",
-      );
-    }
     const x = (index) => pad.left + index * plotWidth / Math.max(samples.length - 1, 1);
     const y = (value, family) => {
       const [min, max] = bounds[family];
@@ -156,8 +194,8 @@ function startDashboard() {
     ctx.textAlign = "left";
     if (hasDistance) ctx.fillText("Distance (m)", 4, 14);
     if (hasError) {
-      ctx.textAlign = errorOnly ? "left" : "right";
-      ctx.fillText("Error (m)", errorOnly ? 4 : width - 4, 14);
+      ctx.textAlign = "right";
+      ctx.fillText("Error (m)", width - 4, 14);
     }
     for (let index = 0; index <= 4; index++) {
       const row = pad.top + index * plotHeight / 4;
@@ -166,7 +204,7 @@ function startDashboard() {
       for (const family of ["distance", "error"]) {
         if ((family === "distance" && !hasDistance) || (family === "error" && !hasError)) continue;
         const [min, max] = bounds[family];
-        const left = family === "distance" || errorOnly;
+        const left = family === "distance";
         ctx.textAlign = left ? "right" : "left";
         ctx.fillStyle = "#52615e";
         ctx.fillText(format(max - (max - min) * index / 4), left ? pad.left - 7 : width - pad.right + 7, row + 4);
@@ -221,9 +259,8 @@ function startDashboard() {
       ["range-value", "corrected_m"], ["expected-value", "expected_m"], ["residual-value", "residual_m"],
       ["bias-value", "rolling_bias_m"], ["spread-value", "rolling_std_m"],
     ]) byId(id).textContent = format(last[key]);
-    const selected = SERIES.filter((s) => preferences.series.includes(s.key));
-    drawChart(byId("distance-chart"), samples, selected);
-    if (preferences.secondary) drawChart(byId("residual-chart"), samples, selected.filter((s) => s.family === "error"), true);
+    drawChart(byId("distance-chart"), samples, preferences);
+    if (preferences.secondary) drawChart(byId("residual-chart"), samples, preferences.secondPlot);
     byId("view-state").textContent = view.paused() ? "Paused view - acquisition continues" : "Live view";
     byId("view-state").classList.toggle("paused", view.paused());
     byId("pause-view").textContent = view.paused() ? "Resume view" : "Pause view";
@@ -280,12 +317,16 @@ function startDashboard() {
   }
 
   document.querySelector(".display-controls").addEventListener("change", updatePreferences);
+  for (const prefix of ["", "second-"]) {
+    byId(`${prefix}plot-controls`).addEventListener("change", () => updatePlotPreferences(prefix));
+  }
   byId("pause-view").addEventListener("click", () => {
     if (view.paused()) view.resume(); else view.pause();
     drawAll();
   });
   byId("reset-display").addEventListener("click", () => {
     preferences = validatePreferences(DEFAULTS);
+    showError("plot-error", ""); showError("second-plot-error", "");
     showError("settings-error", ""); syncControls(); savePreferences(); drawAll();
   });
   byId("toggle-controls").addEventListener("click", () => {
@@ -330,5 +371,5 @@ function startDashboard() {
   setInterval(refreshStatus, 1000);
 }
 
-if (typeof module !== "undefined") module.exports = { DEFAULTS, validatePreferences, axisBounds, createViewState };
+if (typeof module !== "undefined") module.exports = { DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData };
 if (typeof document !== "undefined") startDashboard();

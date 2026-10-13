@@ -44,6 +44,71 @@ test("automatic bounds ignore missing data and include residual zero", () => {
   assert.deepEqual(plain(api.axisBounds([9], { auto: false, min: 1, max: 3 })), [1, 3]);
 });
 
+test("each plot has independent trace selection and axis settings", () => {
+  const settings = api.validatePreferences(api.DEFAULTS);
+  assert.deepEqual(plain(settings.secondPlot.series), ["residual_m"]);
+  settings.series = ["corrected_m"];
+  settings.distance = { auto: false, min: 1, max: 3 };
+  settings.secondPlot.series = ["raw_m", "residual_m"];
+  settings.secondPlot.distance = { auto: false, min: 0, max: 5 };
+  settings.secondPlot.error = { auto: false, min: -0.2, max: 0.2 };
+  const restored = api.validatePreferences(JSON.parse(JSON.stringify(settings)));
+  assert.deepEqual(plain(restored.series), ["corrected_m"]);
+  assert.deepEqual(plain(restored.secondPlot.series), ["raw_m", "residual_m"]);
+  assert.equal(restored.distance.min, 1);
+  assert.equal(restored.secondPlot.distance.min, 0);
+  restored.secondPlot.error.min = -1;
+  assert.equal(restored.error.min, -0.1);
+  assert.equal(api.DEFAULTS.secondPlot.error.min, -0.1);
+  restored.secondPlot.series.push("expected_m");
+  assert.deepEqual(plain(api.DEFAULTS.secondPlot.series), ["residual_m"]);
+});
+
+test("legacy settings retain plot 1 and initialize independent plot 2 defaults", () => {
+  const legacy = plain(api.DEFAULTS);
+  delete legacy.secondPlot;
+  legacy.series = ["raw_m", "rolling_bias_m"];
+  legacy.distance = { auto: false, min: 1, max: 8 };
+  const migrated = api.validatePreferences(legacy);
+  assert.deepEqual(plain(migrated.series), legacy.series);
+  assert.deepEqual(plain(migrated.distance), legacy.distance);
+  assert.deepEqual(plain(migrated.secondPlot), plain(api.DEFAULTS.secondPlot));
+  assert.notEqual(migrated.distance, migrated.secondPlot.distance);
+});
+
+test("invalid second plot settings are rejected even when the plot is hidden", () => {
+  for (const secondPlot of [
+    null, {}, { ...api.DEFAULTS.secondPlot, series: ["unknown"] },
+    { ...api.DEFAULTS.secondPlot, error: { auto: false, min: 1, max: 1 } },
+    { ...api.DEFAULTS.secondPlot, distance: { auto: false, min: NaN, max: 5 } },
+  ]) {
+    assert.throws(() => api.validatePreferences({ ...api.DEFAULTS, secondary: false, secondPlot }));
+  }
+});
+
+test("plot render data contains only its selected traces and own bounds", () => {
+  const samples = [
+    { corrected_m: 2, raw_m: 2.1, residual_m: 0.1 },
+    { corrected_m: 2.05, raw_m: 2.15, residual_m: 0.15 },
+  ];
+  const first = api.getPlotData(samples, {
+    ...api.DEFAULTS, series: ["corrected_m"],
+    distance: { auto: false, min: 1, max: 3 },
+  });
+  const second = api.getPlotData(samples, {
+    ...api.DEFAULTS.secondPlot, series: ["raw_m", "residual_m"],
+    distance: { auto: false, min: 0, max: 5 },
+    error: { auto: false, min: -0.2, max: 0.2 },
+  });
+  assert.deepEqual(plain(first.selected.map((s) => s.key)), ["corrected_m"]);
+  assert.deepEqual(plain(second.selected.map((s) => s.key)), ["raw_m", "residual_m"]);
+  assert.deepEqual(plain(first.bounds.distance), [1, 3]);
+  assert.deepEqual(plain(second.bounds.distance), [0, 5]);
+  assert.deepEqual(plain(second.bounds.error), [-0.2, 0.2]);
+  const empty = api.getPlotData(samples, { ...api.DEFAULTS.secondPlot, series: [] });
+  assert.equal(empty.selected.length, 0);
+});
+
 test("sample buffer is bounded and changing display count does not discard history", () => {
   const state = api.createViewState(20);
   for (let seq = 1; seq <= 30; seq++) state.add({ seq });

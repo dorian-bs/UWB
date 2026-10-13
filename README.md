@@ -44,10 +44,13 @@ obstruction, use `make replay`.
 
 ### Explore the data
 
-Use the checkboxes to overlay raw/corrected/expected distance (left axis) and residual,
-rolling bias and spread (right axis). The toolbar sets the last N samples, plot height,
-and lines/points. Open **Axis limits and additional plot** for manual limits or a second
-error plot. **Hide experiment controls** gives the plot more room.
+Each plot has its own checkboxes for raw/corrected/expected distance (left axis) and
+residual, rolling bias and spread (right axis). Enable **Show Plot 2** for a second plot
+with all six traces available independently; it initially selects residual only.
+Open **Plot 1 axis limits** or **Plot 2 axis limits** for that plot's auto/manual scales.
+Selections and limits are remembered separately, including when Plot 2 is hidden.
+The shared toolbar sets the last N samples, plot height, and lines/points for both plots.
+**Hide experiment controls** gives the plots more room.
 
 **Pause view** freezes charts and measurement readouts while acquisition, recording and
 health counters continue. Resume returns to the latest samples. Display settings are
