@@ -1,46 +1,24 @@
 # UWB Project Documentation
 
-This directory is the working source of truth for the UWB ranging and noise-modeling project. It separates verified behavior in the current firmware from proposed integration work.
+Start with the [root README](../README.md) for installation/hardware commands,
+the [host README](../host/README.md) for host-only usage, or [CLAUDE.md](../CLAUDE.md) for agent orientation.
 
-For installation and first-run commands, start with the repository [README](../README.md).
-For an orientation brief aimed at AI coding agents, see [CLAUDE.md](../CLAUDE.md).
-
-## Document map
-
-| Document | Purpose |
+| Document | Canonical contents |
 | --- | --- |
-| [CLAUDE.md](../CLAUDE.md) | Agent brief: layout, telemetry contract, hardware-free workflow, conventions |
-| [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | Research goals, scope, terminology, and success criteria |
-| [CODEBASE_LAYOUT.md](CODEBASE_LAYOUT.md) | Verified description of the current STM32 and ESP32 code |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Target system, UI behavior, telemetry schema, and dynamic-prior semantics |
-| [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) | Ordered implementation phases and acceptance criteria |
-| [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) | Original firmware and newly added system summary |
-| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | Short record of completed and remaining work |
-| [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md) | Data-collection protocol, baselines, models, and evaluation rules |
-| [LITERATURE.md](LITERATURE.md) | Supervisor-provided references and reading priorities |
+| [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) | Research goals, scope, vocabulary, success criteria |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current codebase/ownership, wire contract, target UI/prior/storage/control design |
+| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | Working features, limitations, integration history, phased roadmap and acceptance criteria |
+| [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md) | Collection protocol, data quality, splits, baselines, models, metrics |
+| [LITERATURE.md](LITERATURE.md) | Supplied bibliography, reading priorities, extraction checklist |
+| [LAB_NOTES.example.md](LAB_NOTES.example.md) | Template for ignored, machine-specific lab notes |
 
-## Rules for future development
+## Maintenance rules
 
-1. Label statements as **Current**, **Planned**, or **Decision needed** when the distinction is not obvious.
-2. Update `CODEBASE_LAYOUT.md` when ownership, interfaces, build steps, or the top-level folder layout changes.
-3. Update `ARCHITECTURE.md` before changing a persisted schema or device/host protocol. Schema changes must be versioned.
-4. Never modify stored raw measurements when a calibration, prior, or model changes. Derived outputs must identify the input dataset, configuration, prior revision, and model version.
-5. Add a replay-based test before relying on live hardware for a new parser, analysis stage, or UI behavior.
-6. Keep STM32CubeMX-generated edits inside `USER CODE` sections where possible.
-7. Do not commit network credentials, participant information, room access details, or machine-specific device paths.
+- Distinguish **Current**, **Planned**, and **Decision needed**; update status when behavior changes.
+- Keep ownership/interfaces and persisted/wire schemas in architecture; version schema changes.
+- Preserve raw observations. Derived outputs identify dataset, configuration, prior, and model revisions.
+- Test new parser/analysis/UI behavior with replay before relying on hardware; protect CubeMX `USER CODE` regions.
+- Never commit credentials, participant information, room access details, or machine-specific device paths.
 
-## Recommended top-level additions
-
-These folders are planned but should be created only when their phase starts:
-
-```text
-host/                    Python acquisition, analysis, API, and UI service
-tests/                   Protocol, replay, analysis, and integration tests
-data/
-  README.md              Dataset storage policy; raw recordings stay untracked
-  manifests/             Versioned metadata without large measurement files
-configs/                 Versioned radio, experiment, prior, and model configs
-models/                  Model definitions and small metadata; weights untracked
-```
-
-Large data and trained weights should live in managed external storage or Git LFS/DVC, not ordinary Git history.
+The former codebase layout is merged into architecture; the implementation summary and integration
+plan are merged into status. Add new files only for a distinct subject, not a second copy of these facts.

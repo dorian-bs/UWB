@@ -85,7 +85,13 @@ bash scripts/run_dashboard.sh --source tcp --tcp-host ESP32_IP
 Use these commands during bring-up and debugging.
 
 Addresses and serial paths differ per machine and per lab session, so they are not recorded here.
-Keep yours in `LAB_NOTES.md` — copy `LAB_NOTES.example.md` to start one. That file is gitignored.
+Keep yours in `LAB_NOTES.md` — copy [the template](docs/LAB_NOTES.example.md) to start one:
+
+```bash
+cp docs/LAB_NOTES.example.md LAB_NOTES.md
+```
+
+The resulting file is gitignored.
 
 ### List connected USB serial ports
 
@@ -155,4 +161,5 @@ bash scripts/run_dashboard.sh --source tcp --tcp-host 192.168.x.xxx --tcp-port 3
 - `Ctrl+]`: quit `idf.py monitor`.
 - `Ctrl+C`: stop `nc` or most foreground terminal commands.
 
-For implementation progress and limitations, see [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
+For the documentation map, see [docs/README.md](docs/README.md); for progress, limitations,
+and the phased roadmap, see [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).

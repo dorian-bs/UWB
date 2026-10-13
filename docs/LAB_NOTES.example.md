@@ -1,13 +1,13 @@
 # Lab notes (template)
 
-Copy this to `LAB_NOTES.md` — which is gitignored — and fill in your own values.
+From the repository root, copy this to `LAB_NOTES.md` (gitignored) and fill in your own values.
 
 ```bash
-cp LAB_NOTES.example.md LAB_NOTES.md
+cp docs/LAB_NOTES.example.md LAB_NOTES.md
 ```
 
-Keep real addresses, serial paths, and credentials in `LAB_NOTES.md` only. Never put them in
-`README.md`, `docs/`, or source.
+Keep real addresses and serial paths in `LAB_NOTES.md` only, never in tracked docs or source.
+Keep credentials in the untracked ESP32 `sdkconfig`, not in lab notes.
 
 ## Boards
 

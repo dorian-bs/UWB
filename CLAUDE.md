@@ -82,7 +82,7 @@ about is safe (it is ignored); removing or renaming one is not.
   the `.ioc` does not wipe them.
 - **No secrets in Git.** Wi-Fi credentials live in the ESP32 `sdkconfig` (untracked, set via
   `make esp-config`). Lab IP addresses and `/dev/tty.*` paths are machine-specific: they belong in
-  the gitignored `LAB_NOTES.md` (template: `LAB_NOTES.example.md`), never in `README.md`, `docs/`,
+  the gitignored `LAB_NOTES.md` (template: `docs/LAB_NOTES.example.md`), never in `README.md`, `docs/`,
   or source. If a task needs a real board address, read `LAB_NOTES.md` — do not copy it anywhere
   tracked.
 - Python targets 3.11+, uses `from __future__ import annotations` and modern type hints. Formatting
@@ -106,10 +106,8 @@ about is safe (it is ignored); removing or renaming one is not.
 | File | Read it when |
 | --- | --- |
 | `docs/PROJECT_CONTEXT.md` | You need the research goal, scope, or vocabulary |
-| `docs/CODEBASE_LAYOUT.md` | You need verified detail on the firmware |
-| `docs/ARCHITECTURE.md` | You are touching a schema, protocol, or the prior semantics |
-| `docs/IMPLEMENTATION_STATUS.md` | You want to know what works and what is next |
-| `docs/INTEGRATION_PLAN.md` | You are picking up a planned phase |
+| `docs/ARCHITECTURE.md` | You need firmware/codebase detail, a schema, protocol, or prior semantics |
+| `docs/IMPLEMENTATION_STATUS.md` | You need current status, integration history, or a planned phase |
 | `docs/EXPERIMENTS_AND_VALIDATION.md` | You are doing analysis, splits, or evaluation |
 | `README.md` | Hardware bring-up, flashing, serial ports, monitor commands |
 
