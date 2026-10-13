@@ -24,6 +24,14 @@ else
   host_errors=$((host_errors + 1))
 fi
 
+if command -v node >/dev/null 2>&1 && \
+   node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)'; then
+  printf "[ok] %-22s %s\n" "Node.js (tests only)" "$(node --version)"
+else
+  echo "[missing] Node.js 18+ (needed for dashboard tests, not demo/replay)"
+  host_errors=$((host_errors + 1))
+fi
+
 echo
 echo "Firmware toolchains (needed for: make build, make esp-*, make stm-*)"
 
@@ -48,7 +56,7 @@ fi
 
 echo
 if (( host_errors > 0 )); then
-  echo "Host environment is incomplete; host work cannot run. Fix: bash scripts/setup_macos.sh" >&2
+  echo "Host tools are incomplete; see missing entries above. Fix: bash scripts/setup_macos.sh" >&2
 elif (( firmware_errors > 0 )); then
   echo "Host work is ready. Firmware toolchains are incomplete; only firmware builds and flashing are blocked." >&2
 fi

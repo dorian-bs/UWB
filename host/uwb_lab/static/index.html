@@ -9,44 +9,81 @@
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">Experimental ranging console</p>
       <h1>UWB Lab</h1>
     </div>
     <div class="connection">
       <span id="status-dot" class="status-dot"></span>
       <span id="connection-label">Connecting</span>
       <span id="source-label" class="source-label">demo</span>
+      <button id="toggle-controls" type="button" aria-expanded="true" aria-controls="experiment-controls">Hide experiment controls</button>
     </div>
   </header>
 
   <main class="workspace">
     <section class="measurements">
+      <p id="display-warning" class="error" role="status" hidden></p>
       <div class="metrics" aria-label="Current measurements">
-        <div><span>Range</span><strong id="range-value">--</strong><small>m</small></div>
+        <div><span>Corrected range</span><strong id="range-value">--</strong><small>m</small></div>
         <div><span>Expected</span><strong id="expected-value">--</strong><small>m</small></div>
         <div><span>Residual</span><strong id="residual-value">--</strong><small>m</small></div>
         <div><span>Rolling bias</span><strong id="bias-value">--</strong><small>m</small></div>
         <div><span>Rolling spread</span><strong id="spread-value">--</strong><small>m</small></div>
       </div>
 
+      <section class="display-controls" aria-label="Plot settings">
+        <div class="toolbar">
+          <label>Last N samples<input id="display-count" type="number" min="10" max="2000" step="1" value="180"></label>
+          <label>Height (px)<input id="plot-height" type="number" min="180" max="600" step="10" value="300"></label>
+          <label>Draw<select id="plot-style"><option value="lines">Lines</option><option value="points">Points</option><option value="both">Lines + points</option></select></label>
+          <button id="pause-view" type="button" aria-pressed="false">Pause view</button>
+          <button id="reset-display" type="button">Reset display</button>
+        </div>
+        <fieldset id="series-controls" class="series-controls">
+          <legend>Visible series (m): distance on left; residual, bias and spread on right</legend>
+          <label class="raw"><input type="checkbox" value="raw_m">Raw</label>
+          <label class="corrected"><input type="checkbox" value="corrected_m" checked>Corrected</label>
+          <label class="expected"><input type="checkbox" value="expected_m" checked>Expected</label>
+          <label class="residual"><input type="checkbox" value="residual_m" checked>Residual</label>
+          <label class="bias"><input type="checkbox" value="rolling_bias_m">Rolling bias</label>
+          <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
+        </fieldset>
+        <details class="axis-settings">
+          <summary>Axis limits and additional plot</summary>
+          <div class="axis-grid">
+            <fieldset><legend>Distance / left axis (m)</legend>
+              <label class="check"><input id="distance-auto" type="checkbox" checked>Auto scale</label>
+              <label>Minimum<input id="distance-min" type="number" step="any" value="0" disabled></label>
+              <label>Maximum<input id="distance-max" type="number" step="any" value="4" disabled></label>
+            </fieldset>
+            <fieldset><legend>Error / right axis (m)</legend>
+              <label class="check"><input id="error-auto" type="checkbox" checked>Auto scale (includes zero)</label>
+              <label>Minimum<input id="error-min" type="number" step="any" value="-0.1" disabled></label>
+              <label>Maximum<input id="error-max" type="number" step="any" value="0.1" disabled></label>
+            </fieldset>
+          </div>
+          <label class="check"><input id="secondary-plot" type="checkbox">Show a separate error plot (selected residual, bias and spread)</label>
+        </details>
+        <p id="settings-error" class="error" role="alert" hidden></p>
+      </section>
       <div class="plot-block">
         <div class="plot-heading">
-          <h2>Distance</h2>
-          <div class="legend"><span class="raw">Measured</span><span class="expected">Expected</span></div>
+          <h2>Measurements</h2>
+          <span id="view-state" role="status">Live view</span>
         </div>
-        <canvas id="distance-chart" aria-label="Live distance plot"></canvas>
+        <canvas id="distance-chart" aria-label="Measurements: distance on left axis, error on right axis"></canvas>
+        <p id="window-label" class="plot-note"></p>
       </div>
 
-      <div class="plot-block">
+      <div id="secondary-block" class="plot-block" hidden>
         <div class="plot-heading">
-          <h2>Residual</h2>
-          <div class="legend"><span class="residual">Error</span><span class="zero">Zero</span></div>
+          <h2>Error detail</h2>
+          <span class="plot-note">Same sample window and error scale</span>
         </div>
-        <canvas id="residual-chart" aria-label="Live residual plot"></canvas>
+        <canvas id="residual-chart" aria-label="Selected residual, rolling bias and spread; error axis in metres"></canvas>
       </div>
     </section>
 
-    <aside class="controls">
+    <aside id="experiment-controls" class="controls">
       <section>
         <div class="section-title">
           <h2>Geometry prior</h2>
@@ -92,6 +129,7 @@
             <input name="note" maxlength="200" placeholder="e.g. clear LOS at 2 m">
           </label>
           <button type="submit">Apply prior</button>
+          <p id="prior-error" class="error" role="alert" hidden></p>
         </form>
       </section>
 
@@ -105,10 +143,12 @@
             <input name="name" maxlength="80" value="experiment">
           </label>
           <button id="record-button" type="submit">Start recording</button>
+          <p id="recording-error" class="error" role="alert" hidden></p>
         </form>
       </section>
 
-      <section class="health">
+    </aside>
+      <section class="health" aria-label="Live stream health">
         <h2>Stream health</h2>
         <dl>
           <div><dt>Samples</dt><dd id="sample-count">0</dd></div>
@@ -116,9 +156,8 @@
           <div><dt>Debug/non-JSON lines</dt><dd id="ignored-count">0</dd></div>
           <div><dt>Malformed JSON lines</dt><dd id="malformed-count">0</dd></div>
         </dl>
-        <p id="error-message" class="error" hidden></p>
+        <p id="error-message" class="error" role="alert" hidden></p>
       </section>
-    </aside>
   </main>
 
   <script src="/app.js"></script>

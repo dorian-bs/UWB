@@ -23,6 +23,9 @@ command -v cmake >/dev/null 2>&1 || packages+=(cmake)
 command -v ninja >/dev/null 2>&1 || packages+=(ninja)
 command -v openocd >/dev/null 2>&1 || packages+=(open-ocd)
 command -v dfu-util >/dev/null 2>&1 || packages+=(dfu-util)
+if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)'; then
+  packages+=(node)
+fi
 brew list --versions python@3.13 >/dev/null 2>&1 || packages+=(python@3.13)
 
 if (( ${#packages[@]} > 0 )); then

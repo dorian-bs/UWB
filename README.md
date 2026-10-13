@@ -23,7 +23,8 @@ make test
 
 The setup is safe to rerun. It installs:
 
-- CMake, Ninja, OpenOCD, dfu-util, and Python 3.13 through Homebrew when missing.
+- CMake, Ninja, OpenOCD, dfu-util, Python 3.13, and Node.js (dashboard tests only)
+  through Homebrew when missing.
 - Arm GNU Toolchain 14.3.rel1 under `~/.local/`.
 - ESP-IDF v5.5.5 and ESP32-S3 tools under `~/esp/` and `~/.espressif/`.
 - Host Python dependencies in the repository `.venv/`.
@@ -41,6 +42,20 @@ Open <http://127.0.0.1:8000>. This uses generated data and requires no hardware.
 To see the dashboard against a recorded-looking session, including a simulated NLOS
 obstruction, use `make replay`.
 
+### Explore the data
+
+Use the checkboxes to overlay raw/corrected/expected distance (left axis) and residual,
+rolling bias and spread (right axis). The toolbar sets the last N samples, plot height,
+and lines/points. Open **Axis limits and additional plot** for manual limits or a second
+error plot. **Hide experiment controls** gives the plot more room.
+
+**Pause view** freezes charts and measurement readouts while acquisition, recording and
+health counters continue. Resume returns to the latest samples. Display settings are
+remembered locally; **Reset display** restores defaults without changing your prior or
+recording. The display window does not change the host's 20-residual rolling calculations.
+Up to 2000 samples accumulate in the browser; reconnecting starts from the host's
+up-to-300-sample snapshot. Missing prior-derived values are not plotted as zero.
+
 ## Change host code
 
 ```bash
@@ -49,6 +64,8 @@ make fmt      # auto-format and auto-fix
 ```
 
 `make verify` needs no boards and takes under a second. Run it before committing host changes.
+The dashboard logic tests also require Node.js 18+ (`brew install node` if missing);
+Node is only used for testing, not running the dashboard.
 
 ## Configure and flash hardware
 

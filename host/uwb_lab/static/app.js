@@ -1,191 +1,334 @@
-const history = [];
-let recording = false;
+const SERIES = [
+  { key: "raw_m", family: "distance", color: "#536878", dash: [2, 3] },
+  { key: "corrected_m", family: "distance", color: "#176b87", dash: [] },
+  { key: "expected_m", family: "distance", color: "#966000", dash: [7, 4] },
+  { key: "residual_m", family: "error", color: "#b63036", dash: [] },
+  { key: "rolling_bias_m", family: "error", color: "#7851a9", dash: [7, 4] },
+  { key: "rolling_std_m", family: "error", color: "#087f5b", dash: [2, 3] },
+];
+const DEFAULTS = {
+  count: 180, height: 300, style: "lines", secondary: false, controls: true,
+  series: ["corrected_m", "expected_m", "residual_m"],
+  distance: { auto: true, min: 0, max: 4 },
+  error: { auto: true, min: -0.1, max: 0.1 },
+};
+const STORAGE_KEY = "uwb-lab-display-v1";
 
-const byId = (id) => document.getElementById(id);
-const format = (value, digits = 3) => value == null ? "--" : Number(value).toFixed(digits);
-
-function addSample(sample) {
-  history.push(sample);
-  if (history.length > 180) history.shift();
-  byId("range-value").textContent = format(sample.corrected_m);
-  byId("expected-value").textContent = format(sample.expected_m);
-  byId("residual-value").textContent = format(sample.residual_m);
-  byId("bias-value").textContent = format(sample.rolling_bias_m);
-  byId("spread-value").textContent = format(sample.rolling_std_m);
-  drawAll();
+function validatePreferences(value) {
+  if (!value || !Number.isInteger(value.count) || value.count < 10 || value.count > 2000 ||
+      !Number.isInteger(value.height) || value.height < 180 || value.height > 600 ||
+      !["lines", "points", "both"].includes(value.style) ||
+      typeof value.secondary !== "boolean" || typeof value.controls !== "boolean" ||
+      !Array.isArray(value.series) || value.series.some((key) => !SERIES.some((s) => s.key === key))) {
+    throw new Error("Invalid display settings. Samples: 10-2000; height: 180-600 px.");
+  }
+  for (const family of ["distance", "error"]) {
+    const axis = value[family];
+    if (!axis || typeof axis.auto !== "boolean" || !Number.isFinite(axis.min) ||
+        !Number.isFinite(axis.max) || axis.min >= axis.max || !Number.isFinite(axis.max - axis.min)) {
+      throw new Error(`${family === "distance" ? "Distance" : "Error"} limits must be finite, with minimum below maximum.`);
+    }
+  }
+  return {
+    count: value.count, height: value.height, style: value.style,
+    secondary: value.secondary, controls: value.controls, series: [...new Set(value.series)],
+    distance: { ...value.distance }, error: { ...value.error },
+  };
 }
 
-function drawChart(canvas, series, zeroLine = false) {
-  const box = canvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(box.width * scale));
-  canvas.height = Math.max(1, Math.floor(box.height * scale));
-  const context = canvas.getContext("2d");
-  context.scale(scale, scale);
+function axisBounds(values, axis, includeZero = false) {
+  if (!axis.auto) return [axis.min, axis.max];
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return includeZero ? [-0.01, 0.01] : [0, 1];
+  let min = Math.min(...finite);
+  let max = Math.max(...finite);
+  if (includeZero) { min = Math.min(min, 0); max = Math.max(max, 0); }
+  const margin = Math.max((max - min) * 0.1, includeZero ? 0.01 : 0.03);
+  return [min - margin, max + margin];
+}
 
-  const width = box.width;
-  const height = box.height;
-  const pad = { top: 16, right: 15, bottom: 23, left: 48 };
-  const values = series.flatMap((item) => item.values).filter((value) => value != null && Number.isFinite(value));
-  context.clearRect(0, 0, width, height);
-  if (values.length < 2) {
-    context.fillStyle = "#64706c";
-    context.font = "13px Avenir Next";
-    context.fillText("Waiting for samples", pad.left, height / 2);
-    return;
+function createViewState(limit = 2000) {
+  let history = [];
+  let frozen = null;
+  return {
+    add(sample) { history.push(sample); if (history.length > limit) history.shift(); },
+    snapshot(samples) { history = samples.slice(-limit); },
+    pause() { if (frozen === null) frozen = history.slice(); },
+    resume() { frozen = null; },
+    paused() { return frozen !== null; },
+    visible(count) { return (frozen ?? history).slice(-count); },
+    buffered() { return history.length; },
+  };
+}
+
+function startDashboard() {
+  const byId = (id) => document.getElementById(id);
+  const format = (value, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : "--";
+  const view = createViewState();
+  let preferences = validatePreferences(DEFAULTS);
+  let recording = false;
+  let streamOpen = false;
+  const showError = (id, message) => {
+    byId(id).textContent = message;
+    byId(id).hidden = !message;
+  };
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored !== null) preferences = validatePreferences(JSON.parse(stored));
+  } catch (error) {
+    showError("display-warning", `Display preferences could not be loaded: ${error.message}. Using defaults.`);
   }
-
-  let minimum = Math.min(...values);
-  let maximum = Math.max(...values);
-  const margin = Math.max((maximum - minimum) * 0.15, zeroLine ? 0.01 : 0.03);
-  minimum -= margin;
-  maximum += margin;
-  if (zeroLine) {
-    minimum = Math.min(minimum, 0);
-    maximum = Math.max(maximum, 0);
+  function savePreferences() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences)); }
+    catch (error) { showError("display-warning", `Display settings work, but could not be saved: ${error.message}`); }
   }
-
-  const x = (index) => pad.left + index * (width - pad.left - pad.right) / Math.max(history.length - 1, 1);
-  const y = (value) => pad.top + (maximum - value) * (height - pad.top - pad.bottom) / (maximum - minimum);
-
-  context.strokeStyle = "#d7ded8";
-  context.fillStyle = "#64706c";
-  context.font = "11px SFMono-Regular";
-  for (let index = 0; index <= 4; index += 1) {
-    const value = minimum + (maximum - minimum) * index / 4;
-    const rowY = y(value);
-    context.beginPath();
-    context.moveTo(pad.left, rowY);
-    context.lineTo(width - pad.right, rowY);
-    context.stroke();
-    context.fillText(value.toFixed(3), 4, rowY + 4);
-  }
-
-  if (zeroLine && minimum <= 0 && maximum >= 0) {
-    context.strokeStyle = "#83908b";
-    context.setLineDash([5, 5]);
-    context.beginPath();
-    context.moveTo(pad.left, y(0));
-    context.lineTo(width - pad.right, y(0));
-    context.stroke();
-    context.setLineDash([]);
-  }
-
-  for (const item of series) {
-    context.strokeStyle = item.color;
-    context.lineWidth = 2;
-    context.beginPath();
-    let drawing = false;
-    item.values.forEach((value, index) => {
-      if (value == null) { drawing = false; return; }
-      if (drawing) context.lineTo(x(index), y(value));
-      else { context.moveTo(x(index), y(value)); drawing = true; }
+  function syncControls() {
+    byId("display-count").value = preferences.count;
+    byId("plot-height").value = preferences.height;
+    byId("plot-style").value = preferences.style;
+    byId("secondary-plot").checked = preferences.secondary;
+    document.querySelectorAll("#series-controls input").forEach((input) => {
+      input.checked = preferences.series.includes(input.value);
     });
-    context.stroke();
+    for (const family of ["distance", "error"]) {
+      byId(`${family}-auto`).checked = preferences[family].auto;
+      for (const bound of ["min", "max"]) {
+        byId(`${family}-${bound}`).value = preferences[family][bound];
+        byId(`${family}-${bound}`).disabled = preferences[family].auto;
+      }
+    }
+    byId("experiment-controls").hidden = !preferences.controls;
+    document.querySelector(".workspace").classList.toggle("controls-hidden", !preferences.controls);
+    byId("toggle-controls").setAttribute("aria-expanded", String(preferences.controls));
+    byId("toggle-controls").textContent = `${preferences.controls ? "Hide" : "Show"} experiment controls`;
   }
-}
+  function updatePreferences() {
+    const candidate = {
+      ...preferences, count: Number(byId("display-count").value),
+      height: Number(byId("plot-height").value), style: byId("plot-style").value,
+      secondary: byId("secondary-plot").checked,
+      series: [...document.querySelectorAll("#series-controls input:checked")].map((input) => input.value),
+    };
+    for (const family of ["distance", "error"]) {
+      const auto = byId(`${family}-auto`).checked;
+      candidate[family] = { auto };
+      for (const bound of ["min", "max"]) {
+        const input = byId(`${family}-${bound}`);
+        input.disabled = auto;
+        candidate[family][bound] = auto ? preferences[family][bound] : input.value === "" ? NaN : Number(input.value);
+      }
+    }
+    try {
+      preferences = validatePreferences(candidate);
+      showError("settings-error", "");
+      savePreferences();
+      drawAll();
+    } catch (error) { showError("settings-error", error.message); }
+  }
 
-function drawAll() {
-  drawChart(byId("distance-chart"), [
-    { color: "#176b87", values: history.map((sample) => sample.corrected_m) },
-    { color: "#bc7a16", values: history.map((sample) => sample.expected_m) },
-  ]);
-  drawChart(byId("residual-chart"), [
-    { color: "#c2413b", values: history.map((sample) => sample.residual_m) },
-  ], true);
-}
+  function drawChart(canvas, samples, selected, errorOnly = false) {
+    const box = canvas.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(box.width * scale));
+    canvas.height = Math.max(1, Math.floor(box.height * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    const width = box.width, height = box.height;
+    const pad = { top: 25, right: 65, bottom: 30, left: 65 };
+    const plotWidth = Math.max(1, width - pad.left - pad.right);
+    const plotHeight = height - pad.top - pad.bottom;
+    const hasDistance = selected.some((s) => s.family === "distance");
+    const hasError = selected.some((s) => s.family === "error");
+    const bounds = {};
+    for (const family of ["distance", "error"]) {
+      bounds[family] = axisBounds(
+        selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
+        preferences[family], family === "error",
+      );
+    }
+    const x = (index) => pad.left + index * plotWidth / Math.max(samples.length - 1, 1);
+    const y = (value, family) => {
+      const [min, max] = bounds[family];
+      return pad.top + (max - value) * plotHeight / (max - min);
+    };
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillStyle = "#52615e";
+    ctx.textAlign = "left";
+    if (hasDistance) ctx.fillText("Distance (m)", 4, 14);
+    if (hasError) {
+      ctx.textAlign = errorOnly ? "left" : "right";
+      ctx.fillText("Error (m)", errorOnly ? 4 : width - 4, 14);
+    }
+    for (let index = 0; index <= 4; index++) {
+      const row = pad.top + index * plotHeight / 4;
+      ctx.strokeStyle = "#e0e6e2";
+      ctx.beginPath(); ctx.moveTo(pad.left, row); ctx.lineTo(width - pad.right, row); ctx.stroke();
+      for (const family of ["distance", "error"]) {
+        if ((family === "distance" && !hasDistance) || (family === "error" && !hasError)) continue;
+        const [min, max] = bounds[family];
+        const left = family === "distance" || errorOnly;
+        ctx.textAlign = left ? "right" : "left";
+        ctx.fillStyle = "#52615e";
+        ctx.fillText(format(max - (max - min) * index / 4), left ? pad.left - 7 : width - pad.right + 7, row + 4);
+      }
+    }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(pad.left, pad.top, plotWidth, plotHeight); ctx.clip();
+    if (hasError && bounds.error[0] <= 0 && bounds.error[1] >= 0) {
+      ctx.strokeStyle = "#83908b"; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(pad.left, y(0, "error")); ctx.lineTo(width - pad.right, y(0, "error")); ctx.stroke();
+    }
+    for (const series of selected) {
+      ctx.strokeStyle = series.color; ctx.fillStyle = series.color;
+      ctx.lineWidth = 1.5; ctx.setLineDash(series.dash);
+      if (preferences.style !== "points") {
+        ctx.beginPath();
+        let drawing = false;
+        samples.forEach((sample, index) => {
+          const value = sample[series.key];
+          if (!Number.isFinite(value)) { drawing = false; return; }
+          if (drawing) ctx.lineTo(x(index), y(value, series.family));
+          else { ctx.moveTo(x(index), y(value, series.family)); drawing = true; }
+        });
+        ctx.stroke();
+      }
+      if (preferences.style !== "lines" || samples.length === 1) {
+        samples.forEach((sample, index) => {
+          if (!Number.isFinite(sample[series.key])) return;
+          ctx.beginPath(); ctx.arc(x(index), y(sample[series.key], series.family), 2, 0, Math.PI * 2); ctx.fill();
+        });
+      }
+    }
+    ctx.restore();
+    ctx.fillStyle = "#52615e"; ctx.textAlign = "center";
+    ctx.fillText(`Samples (oldest to newest): ${samples.length}`, width / 2, height - 7);
+    if (samples.length) {
+      ctx.textAlign = "left"; ctx.fillText("1", pad.left, height - 7);
+      ctx.textAlign = "right"; ctx.fillText(String(samples.length), width - pad.right, height - 7);
+    }
+    if (!selected.length || !samples.some((sample) => selected.some((s) => Number.isFinite(sample[s.key])))) {
+      ctx.textAlign = "center";
+      ctx.fillText(!selected.length ? "Select a series to display" : "Waiting for data for selected series", width / 2, height / 2);
+    }
+  }
 
-async function request(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
+  function drawAll() {
+    document.documentElement.style.setProperty("--plot-height", `${preferences.height}px`);
+    byId("secondary-block").hidden = !preferences.secondary;
+    const samples = view.visible(preferences.count);
+    const last = samples.at(-1) || {};
+    for (const [id, key] of [
+      ["range-value", "corrected_m"], ["expected-value", "expected_m"], ["residual-value", "residual_m"],
+      ["bias-value", "rolling_bias_m"], ["spread-value", "rolling_std_m"],
+    ]) byId(id).textContent = format(last[key]);
+    const selected = SERIES.filter((s) => preferences.series.includes(s.key));
+    drawChart(byId("distance-chart"), samples, selected);
+    if (preferences.secondary) drawChart(byId("residual-chart"), samples, selected.filter((s) => s.family === "error"), true);
+    byId("view-state").textContent = view.paused() ? "Paused view - acquisition continues" : "Live view";
+    byId("view-state").classList.toggle("paused", view.paused());
+    byId("pause-view").textContent = view.paused() ? "Resume view" : "Pause view";
+    byId("pause-view").setAttribute("aria-pressed", String(view.paused()));
+    byId("window-label").textContent = `${samples.length} shown / ${preferences.count} requested; ${view.buffered()} live buffered (max 2000). Rolling statistics: host's last 20 residuals, independent of display window.${view.paused() ? " Readouts frozen." : ""}`;
+  }
+
+  async function request(path, options = {}) {
+    const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+    const body = await response.json();
+    if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || "Request failed"));
+    return body;
+  }
+  async function refreshStatus() {
+    try {
+      const status = await request("/api/status");
+      byId("status-dot").classList.toggle("connected", status.connected && streamOpen);
+      byId("connection-label").textContent = !streamOpen ? "Stream reconnecting" : status.connected ? "Live" : "Source disconnected";
+      byId("source-label").textContent = status.source;
+      byId("sample-count").textContent = status.total_samples;
+      byId("gap-count").textContent = status.sequence_gaps;
+      byId("ignored-count").textContent = status.ignored_lines;
+      byId("malformed-count").textContent = status.malformed_lines;
+      byId("prior-revision").textContent = status.prior ? `Revision ${status.prior.revision}` : "No prior";
+      recording = status.recording;
+      byId("recording-state").textContent = recording ? status.session : "Stopped";
+      byId("record-button").textContent = recording ? "Stop recording" : "Start recording";
+      byId("record-button").classList.toggle("stop", recording);
+      showError("error-message", status.last_error || "");
+    } catch (error) {
+      byId("status-dot").classList.remove("connected");
+      byId("connection-label").textContent = "Host unavailable";
+      showError("error-message", error.message);
+    }
+  }
+  function connect() {
+    const protocol = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${location.host}/ws`);
+    socket.onopen = () => { streamOpen = true; refreshStatus(); };
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === "snapshot") view.snapshot(message.samples);
+        else if (message.type === "sample") view.add(message.sample);
+        drawAll();
+      } catch (error) { showError("display-warning", `Stream message could not be displayed: ${error.message}`); }
+    };
+    socket.onclose = () => {
+      streamOpen = false;
+      byId("status-dot").classList.remove("connected");
+      byId("connection-label").textContent = "Stream reconnecting";
+      setTimeout(connect, 1500);
+    };
+  }
+
+  document.querySelector(".display-controls").addEventListener("change", updatePreferences);
+  byId("pause-view").addEventListener("click", () => {
+    if (view.paused()) view.resume(); else view.pause();
+    drawAll();
   });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.detail || "Request failed");
-  return body;
-}
-
-async function refreshStatus() {
-  try {
-    const status = await request("/api/status");
-    byId("status-dot").classList.toggle("connected", status.connected);
-    byId("connection-label").textContent = status.connected ? "Live" : "Disconnected";
-    byId("source-label").textContent = status.source;
-    byId("sample-count").textContent = status.total_samples;
-    byId("gap-count").textContent = status.sequence_gaps;
-    byId("ignored-count").textContent = status.ignored_lines;
-    byId("malformed-count").textContent = status.malformed_lines;
-    byId("prior-revision").textContent = status.prior ? `Revision ${status.prior.revision}` : "No prior";
-    recording = status.recording;
-    byId("recording-state").textContent = recording ? status.session : "Stopped";
-    byId("record-button").textContent = recording ? "Stop recording" : "Start recording";
-    byId("record-button").classList.toggle("stop", recording);
-    byId("error-message").hidden = !status.last_error;
-    byId("error-message").textContent = status.last_error || "";
-  } catch (error) {
-    byId("connection-label").textContent = "Host unavailable";
-  }
-}
-
-function connect() {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${location.host}/ws`);
-  socket.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    if (message.type === "snapshot") {
-      history.length = 0;
-      message.samples.forEach(addSample);
-    } else if (message.type === "sample") {
-      addSample(message.sample);
-    }
-  };
-  socket.onclose = () => setTimeout(connect, 1500);
-}
-
-byId("prior-mode").addEventListener("change", (event) => {
-  const positions = event.target.value === "positions";
-  byId("distance-fields").hidden = positions;
-  byId("position-fields").hidden = !positions;
-  document.querySelector('[name="distance_m"]').required = !positions;
-});
-
-byId("prior-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const fields = new FormData(event.target);
-  const mode = fields.get("mode");
-  const payload = {
-    mode,
-    uncertainty_m: Number(fields.get("uncertainty_m")),
-    note: fields.get("note"),
-  };
-  if (mode === "distance") payload.distance_m = Number(fields.get("distance_m"));
-  else {
-    payload.node_a_m = ["ax", "ay", "az"].map((name) => Number(fields.get(name)));
-    payload.node_b_m = ["bx", "by", "bz"].map((name) => Number(fields.get(name)));
-  }
-  try {
-    await request("/api/prior", { method: "POST", body: JSON.stringify(payload) });
-    await refreshStatus();
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-byId("recording-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    if (recording) await request("/api/recording/stop", { method: "POST" });
+  byId("reset-display").addEventListener("click", () => {
+    preferences = validatePreferences(DEFAULTS);
+    showError("settings-error", ""); syncControls(); savePreferences(); drawAll();
+  });
+  byId("toggle-controls").addEventListener("click", () => {
+    preferences.controls = !preferences.controls; syncControls(); savePreferences(); drawAll();
+  });
+  byId("prior-mode").addEventListener("change", (event) => {
+    const positions = event.target.value === "positions";
+    byId("distance-fields").hidden = positions;
+    byId("position-fields").hidden = !positions;
+    document.querySelector('[name="distance_m"]').required = !positions;
+  });
+  byId("prior-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    showError("prior-error", "");
+    const fields = new FormData(event.target);
+    const mode = fields.get("mode");
+    const payload = { mode, uncertainty_m: Number(fields.get("uncertainty_m")), note: fields.get("note") };
+    if (mode === "distance") payload.distance_m = Number(fields.get("distance_m"));
     else {
-      const name = new FormData(event.target).get("name");
-      await request("/api/recording/start", { method: "POST", body: JSON.stringify({ name }) });
+      payload.node_a_m = ["ax", "ay", "az"].map((name) => Number(fields.get(name)));
+      payload.node_b_m = ["bx", "by", "bz"].map((name) => Number(fields.get(name)));
     }
-    await refreshStatus();
-  } catch (error) {
-    alert(error.message);
-  }
-});
+    try {
+      await request("/api/prior", { method: "POST", body: JSON.stringify(payload) });
+      await refreshStatus();
+    } catch (error) { showError("prior-error", error.message); }
+  });
+  byId("recording-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    showError("recording-error", "");
+    try {
+      if (recording) await request("/api/recording/stop", { method: "POST" });
+      else {
+        const name = new FormData(event.target).get("name");
+        await request("/api/recording/start", { method: "POST", body: JSON.stringify({ name }) });
+      }
+      await refreshStatus();
+    } catch (error) { showError("recording-error", error.message); }
+  });
+  window.addEventListener("resize", drawAll);
+  syncControls(); drawAll(); connect(); refreshStatus();
+  setInterval(refreshStatus, 1000);
+}
 
-window.addEventListener("resize", drawAll);
-connect();
-refreshStatus();
-setInterval(refreshStatus, 1000);
+if (typeof module !== "undefined") module.exports = { DEFAULTS, validatePreferences, axisBounds, createViewState };
+if (typeof document !== "undefined") startDashboard();

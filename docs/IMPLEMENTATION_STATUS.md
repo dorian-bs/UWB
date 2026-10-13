@@ -14,10 +14,19 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
 - Python/FastAPI host supports demo, TCP, USB serial, and recorded-file replay through the same pipeline.
 - Dependency-free browser UI shows range, expected distance, residual, rolling bias/spread,
   and health counters for samples, malformed lines, and missing sequences.
+- Compact experiment console overlays selectable raw/corrected/expected distances and
+  residual/bias/spread using separate distance and error axes. Display controls set sample
+  window, automatic/manual axis limits, plot height and lines/points; a separate error plot
+  is optional and experiment controls can be collapsed. Preferences stay in this browser.
+  Pause freezes plots/readouts only, not acquisition, recording or health counters.
+  Browser history is bounded at 2000 samples (reconnect snapshots contain up to 300);
+  server rolling statistics still use the last 20 residuals, not the display window.
 - Direct-distance and 3D-position priors apply immediately; immutable revision numbers identify derived samples.
   Sessions record telemetry, prior changes, and a small manifest under ignored `data/sessions/`.
 - Parser, prior validation, residual, and recorder tests exist. The first integration pass had five focused tests;
   use the current suite, not this historical count, as the authoritative test inventory.
+- Display-state, axis and preference tests use Node's built-in test runner through pytest,
+  without browser libraries or frontend build tooling.
 - Repeatable/idempotent macOS setup, environment checking, build/run/flash wrappers and top-level `make`
   commands support the project. Dependencies are declared in `host/pyproject.toml`; `.venv` holds the host
   environment. Setup includes ESP-IDF v5.5.5 and a user-local `~/.local/bin/idf.py` launcher.
