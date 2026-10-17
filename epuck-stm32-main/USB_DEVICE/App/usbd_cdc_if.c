@@ -22,6 +22,9 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
+#include "qorvo_platform.h"
+#include "qorvo_control.h"
+#include <string.h>
 
 /* USER CODE END INCLUDE */
 
@@ -152,6 +155,7 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
 static int8_t CDC_Init_FS(void)
 {
   /* USER CODE BEGIN 3 */
+  qorvo_usb_control_lifecycle(true);
   /* Set Application Buffers */
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
@@ -166,6 +170,7 @@ static int8_t CDC_Init_FS(void)
 static int8_t CDC_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
+  qorvo_usb_control_lifecycle(false);
   return (USBD_OK);
   /* USER CODE END 4 */
 }
@@ -180,6 +185,8 @@ static int8_t CDC_DeInit_FS(void)
 static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 {
   /* USER CODE BEGIN 5 */
+  UNUSED(pbuf);
+  UNUSED(length);
   switch(cmd)
   {
     case CDC_SEND_ENCAPSULATED_COMMAND:
@@ -261,8 +268,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+  qorvo_usb_control_receive(Buf, *Len);
   return (USBD_OK);
   /* USER CODE END 6 */
 }
@@ -282,12 +288,10 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 {
   uint8_t result = USBD_OK;
   /* USER CODE BEGIN 7 */
-  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
-  if (hcdc->TxState != 0){
+  if (qorvo_control_ack_pending()) {
     return USBD_BUSY;
   }
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
-  result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+  result = CDC_TransmitControl_FS(Buf, Len);
   /* USER CODE END 7 */
   return result;
 }
@@ -316,6 +320,32 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+void CDC_ControlReceiveReady_FS(void)
+{
+  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
+  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+}
+
+uint8_t CDC_TransmitControl_FS(const uint8_t *Buf, uint16_t Len)
+{
+  /* IRQ logging and main-loop ACKs share the IN endpoint. Copy only while it
+   * is idle, with interrupts masked: UserTxBufferFS stays intact until the
+   * driver's completion clears TxState. Busy ACKs remain in qorvo_control. */
+  uint32_t irq_state = __get_PRIMASK();
+  __disable_irq();
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+  uint8_t result = USBD_BUSY;
+  if (hcdc != NULL && hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED &&
+      hcdc->TxState == 0 && Len <= sizeof(UserTxBufferFS)) {
+    memcpy(UserTxBufferFS, Buf, Len);
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, Len);
+    result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+  }
+  if (irq_state == 0) {
+    __enable_irq();
+  }
+  return result;
+}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 

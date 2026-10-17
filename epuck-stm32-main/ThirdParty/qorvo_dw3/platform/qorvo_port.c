@@ -3,6 +3,8 @@
 #include "usbd_cdc_if.h"
 #include "dw3000_deca_regs.h"
 #include "dw3000_deca_vals.h"
+#include "qorvo_control.h"
+#include "qorvo_radio_control.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -85,7 +87,7 @@ extern const struct dwt_driver_s dw3000_driver;
 
 static void qorvo_log_printf(const char *fmt, ...)
 {
-    char buf[224];
+    char buf[320];
     va_list ap;
     uint16_t len;
 
@@ -614,6 +616,63 @@ typedef struct
 } qorvo_link_ctx_t;
 
 static qorvo_link_ctx_t g_link = {0};
+
+static void qorvo_clear_status_events(void);
+static void qorvo_reset_exchange_timestamps(void);
+
+void qorvo_control_read(qorvo_radio_state_t *state)
+{
+    uint32_t enabled = NVIC_GetEnableIRQ(DWM_IRQ_EXTI_IRQn);
+    HAL_NVIC_DisableIRQ(DWM_IRQ_EXTI_IRQn);
+    qorvo_radio_read(state);
+    if (enabled) HAL_NVIC_EnableIRQ(DWM_IRQ_EXTI_IRQn);
+}
+
+void qorvo_control_pause(void)
+{
+    /* Leave only the radio IRQ disabled while paused; USB and SysTick must
+     * remain live, particularly during the driver's channel calibration. */
+    HAL_NVIC_DisableIRQ(DWM_IRQ_EXTI_IRQn);
+    dwt_forcetrxoff();
+    qorvo_clear_status_events();
+    __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
+    HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
+    g_link.state = QORVO_STATE_IDLE;
+    g_link.last_tx_msg = QORVO_TXMSG_NONE;
+    g_link.tx_busy = 0U;
+    qorvo_reset_exchange_timestamps();
+}
+
+bool qorvo_control_apply(const qorvo_radio_state_t *requested)
+{
+    bool ok = qorvo_radio_apply(requested);
+    dwt_forcetrxoff();
+    qorvo_clear_status_events();
+    if (ok) {
+        dwt_settxantennadelay(qorvo_get_tx_ant_dly());
+        dwt_setrxantennadelay(qorvo_get_rx_ant_dly());
+    }
+    return ok;
+}
+
+bool qorvo_control_resume(void)
+{
+    dwt_forcetrxoff();
+    qorvo_clear_status_events();
+    __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
+    HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
+    g_link.last_tx_tick = HAL_GetTick();
+    if (g_link.role == QORVO_ROLE_RX) {
+        dwt_setrxtimeout(0U);
+        dwt_setpreambledetecttimeout(0U);
+        if (dwt_rxenable(DWT_START_RX_IMMEDIATE) != DWT_SUCCESS) {
+            dwt_forcetrxoff();
+            return false;
+        }
+    }
+    HAL_NVIC_EnableIRQ(DWM_IRQ_EXTI_IRQn);
+    return true;
+}
 
 static volatile uint32_t g_irq_rx_ok_count = 0U;
 static volatile uint32_t g_irq_tx_done_count = 0U;
@@ -1152,13 +1211,14 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
         qorvo_log_printf("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
         qorvo_log_printf("  ds_twr.distance   = %.3f m\r\n", distance_m);
         qorvo_log_printf("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
-        qorvo_log_printf("{\"type\":\"range\",\"v\":1,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true}\r\n",
+        qorvo_log_printf("{\"type\":\"range\",\"v\":1,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true,\"radio_revision\":%lu}\r\n",
                  g_link.board_id,
                  g_link.peer_board_id,
                  (unsigned long)g_link.current_exchange_counter,
                  (unsigned long)HAL_GetTick(),
                  distance_m,
-                 corrected_distance_m);
+                 corrected_distance_m,
+                 (unsigned long)qorvo_control_state()->revision);
 
 #if QORVO_CAL_ANT_DELAY_MODE
         qorvo_stats_add(&g_link.cal_stats, corrected_distance_m);
@@ -1565,6 +1625,8 @@ int32_t qorvo_link_init(uint8_t board_id, qorvo_role_t role)
     }
 
     g_link.initialised = 1U;
+    qorvo_radio_capture_rf();
+    qorvo_control_init(board_id, role == QORVO_ROLE_RX);
     qorvo_log_printf("Link init OK\r\n");
     return DWT_SUCCESS;
 }
@@ -1578,12 +1640,17 @@ void qorvo_link_process(void)
         return;
     }
 
+    qorvo_usb_control_process();
+    if (!qorvo_control_state()->running) {
+        return;
+    }
+
     if (g_link.role == QORVO_ROLE_TX) {
         now = HAL_GetTick();
 
         if ((g_link.state == QORVO_STATE_IDLE) &&
             (g_link.tx_busy == 0U) &&
-            ((now - g_link.last_tx_tick) >= QORVO_TX_PERIOD_MS)) {
+            ((now - g_link.last_tx_tick) >= qorvo_control_state()->period_ms)) {
 
             g_link.last_tx_tick = now;
             g_link.current_exchange_counter = ++g_link.tx_counter;

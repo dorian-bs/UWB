@@ -108,6 +108,11 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
         return None
     if not 0 <= sample["raw_m"] <= 1000 or not 0 <= sample["corrected_m"] <= 1000:
         return None
+    if "radio_revision" in message:
+        revision = message["radio_revision"]
+        if type(revision) is not int or not 0 <= revision <= 0xFFFFFFFF:
+            return None
+        sample["radio_revision"] = revision
     return sample
 
 
@@ -187,6 +192,7 @@ class SessionRecorder:
         self.session_dir: Path | None = None
         self.telemetry_file: Any = None
         self.priors_file: Any = None
+        self.radio_file: Any = None
         self.started_at: str | None = None
         self.sample_count = 0
 
@@ -212,6 +218,7 @@ class SessionRecorder:
         (session_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         self.telemetry_file = (session_dir / "telemetry.ndjson").open("a", encoding="utf-8")
         self.priors_file = (session_dir / "priors.ndjson").open("a", encoding="utf-8")
+        self.radio_file = (session_dir / "radio.ndjson").open("a", encoding="utf-8")
         self.sample_count = 0
         self.session_dir = session_dir
         return session_dir
@@ -227,6 +234,11 @@ class SessionRecorder:
             self.priors_file.write(json.dumps(prior.to_dict(), separators=(",", ":")) + "\n")
             self.priors_file.flush()
 
+    def record_radio(self, event: dict[str, Any]) -> None:
+        if self.radio_file is not None:
+            self.radio_file.write(json.dumps(event, separators=(",", ":")) + "\n")
+            self.radio_file.flush()
+
     def stop(self) -> Path:
         if self.session_dir is None:
             raise ValueError("no recording is active")
@@ -235,6 +247,11 @@ class SessionRecorder:
             self.telemetry_file.close()
         if self.priors_file is not None:
             self.priors_file.close()
+        if self.radio_file is not None:
+            self.radio_file.close()
+        self.telemetry_file = None
+        self.priors_file = None
+        self.radio_file = None
         manifest_path = session_dir / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest.update({"completed": True, "ended_at": utc_now(), "sample_count": self.sample_count})

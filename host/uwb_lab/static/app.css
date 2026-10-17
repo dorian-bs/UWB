@@ -40,6 +40,10 @@ button:hover { background: #dce7e1; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 button[aria-pressed="true"] { background: #fff0cc; border-color: #9b6900; }
 input:disabled { background: #edf0ee; color: #69746f; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+#radio-fields { display: grid; gap: 8px; }
+#radio-refresh { margin-top: 8px; }
+#radio-state { white-space: pre-line; overflow-wrap: anywhere; }
 input[type="checkbox"] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: var(--blue); }
 fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 legend { color: var(--muted); font-size: 12px; margin-bottom: 5px; }

@@ -39,6 +39,9 @@ void qorvo_rx_timeout_test(void);
 /* -------------------------------------------------------------------------- */
 int32_t qorvo_link_init(uint8_t board_id, qorvo_role_t role);
 void qorvo_link_process(void);
+void qorvo_usb_control_receive(const uint8_t *data, uint32_t len);
+void qorvo_usb_control_process(void);
+void qorvo_usb_control_lifecycle(bool connected);
 
 /* -------------------------------------------------------------------------- */
 /* SPI low-level callbacks exposed to the Qorvo driver                        */

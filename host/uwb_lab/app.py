@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
 import time
@@ -15,9 +16,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .core import LabState, SessionRecorder
+from .radio import ControlError, RadioConfig, RadioControl, SampleRate, SerialBoard
 
 PACKAGE_DIR = Path(__file__).parent
 DATA_DIR = Path(os.getenv("UWB_DATA_DIR", PACKAGE_DIR.parent.parent / "data" / "sessions"))
+logger = logging.getLogger(__name__)
 
 
 class PriorInput(BaseModel):
@@ -42,20 +45,38 @@ class Runtime:
         self.connected = False
         self.last_error: str | None = None
         self.task: asyncio.Task[None] | None = None
+        self.sample_rate = SampleRate()
+        self.radio: RadioControl | None = None
+        if self.source == "dual-serial":
+            tx_port = os.getenv("UWB_SERIAL_PORT", "")
+            rx_port = os.getenv("UWB_RESPONDER_PORT", "")
+            if not tx_port or not rx_port or Path(tx_port).resolve() == Path(rx_port).resolve():
+                self.last_error = "dual-serial requires two distinct USB serial ports"
+            else:
+                self.radio = RadioControl(
+                    SerialBoard(tx_port, "tx"), SerialBoard(rx_port, "rx"), self.recorder
+                )
 
-    async def ingest(self, line: str) -> None:
+    async def ingest(self, line: str, received_at: float | None = None) -> None:
         sample = self.state.add_line(line)
         if sample is None:
             return
+        if sample["valid"]:
+            self.sample_rate.add(received_at)
         self.recorder.record_sample(sample)
         stale_clients: list[WebSocket] = []
-        for client in self.clients:
+        for client in tuple(self.clients):
             try:
-                await client.send_json({"type": "sample", "sample": sample})
-            except Exception:
+                await asyncio.wait_for(client.send_json({"type": "sample", "sample": sample}), timeout=0.5)
+            except (TimeoutError, WebSocketDisconnect, RuntimeError, OSError) as error:
+                logger.warning("Disconnecting dashboard client after telemetry delivery failed: %s", error)
                 stale_clients.append(client)
         for client in stale_clients:
             self.clients.discard(client)
+            try:
+                await asyncio.wait_for(client.close(code=1013), timeout=0.5)
+            except (TimeoutError, WebSocketDisconnect, RuntimeError, OSError) as error:
+                logger.warning("Dashboard client could not be closed: %s", error)
 
     def status(self) -> dict[str, Any]:
         return {
@@ -69,6 +90,8 @@ class Runtime:
             "recording": self.recorder.active,
             "session": self.recorder.session_dir.name if self.recorder.session_dir else None,
             "prior": self.state.prior.to_dict() if self.state.prior else None,
+            "observed_hz": self.sample_rate.value(),
+            "radio": self.radio.status() if self.radio else {"supported": False},
         }
 
 
@@ -160,6 +183,8 @@ async def replay_source() -> AsyncIterator[str]:
                             "valid",
                         )
                     }
+                    if "radio_revision" in message:
+                        compact["radio_revision"] = message["radio_revision"]
                     yield json.dumps(compact)
                     await asyncio.sleep(float(os.getenv("UWB_REPLAY_INTERVAL", "0.2")))
     finally:
@@ -167,6 +192,12 @@ async def replay_source() -> AsyncIterator[str]:
 
 
 async def acquisition_loop() -> None:
+    if runtime.source == "dual-serial":
+        try:
+            await dual_serial_acquisition()
+        except (ControlError, OSError) as error:
+            runtime.last_error = str(error)
+        return
     sources = {"demo": demo_source, "tcp": tcp_source, "serial": serial_source, "replay": replay_source}
     factory = sources.get(runtime.source)
     if factory is None:
@@ -182,6 +213,38 @@ async def acquisition_loop() -> None:
     except Exception as error:
         runtime.connected = False
         runtime.last_error = str(error)
+
+
+async def dual_serial_acquisition() -> None:
+    control = runtime.radio
+    if control is None:
+        return
+    tasks = [asyncio.create_task(board.run(runtime.ingest)) for board in control.boards.values()]
+    try:
+        while True:
+            for task in tasks:
+                if task.done():
+                    await task
+                    raise ControlError("USB acquisition stopped unexpectedly")
+            runtime.connected = all(board.connected for board in control.boards.values())
+            if runtime.connected and not control.busy:
+                try:
+                    await control.refresh()
+                except ControlError as error:
+                    runtime.last_error = str(error)
+                else:
+                    runtime.last_error = None
+            else:
+                errors = [
+                    board.status()["error"] for board in control.boards.values() if board.status()["error"]
+                ]
+                runtime.last_error = "; ".join(errors) or "Waiting for both USB boards"
+            await asyncio.sleep(2)
+    finally:
+        runtime.connected = False
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @asynccontextmanager
@@ -224,6 +287,19 @@ async def samples() -> dict[str, Any]:
     return {"samples": list(runtime.state.samples)}
 
 
+@app.post("/api/radio")
+async def set_radio(payload: RadioConfig) -> dict[str, Any]:
+    if runtime.radio is None:
+        raise HTTPException(status_code=409, detail="Radio control requires the dual-serial hardware source")
+    try:
+        return await runtime.radio.apply(payload)
+    except ControlError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        runtime.radio.last_error = f"Radio recording failed: {error}"
+        raise HTTPException(status_code=500, detail=runtime.radio.last_error) from error
+
+
 @app.post("/api/prior")
 async def set_prior(payload: PriorInput) -> dict[str, Any]:
     try:
@@ -242,6 +318,8 @@ async def start_recording(payload: RecordingInput) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(error)) from error
     if runtime.state.prior:
         runtime.recorder.record_prior(runtime.state.prior)
+    if runtime.radio:
+        runtime.radio.record("snapshot")
     return {"recording": True, "session": path.name}
 
 

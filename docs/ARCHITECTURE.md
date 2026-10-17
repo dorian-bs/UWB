@@ -1,6 +1,6 @@
 # Architecture, Codebase, and Data Contract
 
-**Current:** firmware and host behavior documented on 2026-09-28.
+**Current:** baseline documented on 2026-09-28; dual-USB radio controls added on 2026-10-13.
 **Planned:** richer protocol, storage, and experiment-console requirements below.
 See [implementation status and roadmap](IMPLEMENTATION_STATUS.md) for delivery order.
 
@@ -38,14 +38,16 @@ DW3000 --SPI/IRQ--> STM32F405 initiator <--DS-TWR--> STM32F405 responder + DW300
   The main loop calls `qorvo_link_process()` and toggles a 1 Hz status LED.
 - `TxDebug`/`RxDebug` presets select board identity and initiator/responder role.
 - SPI1 starts with a conservative DW3000 initialization prescaler. An interrupt-driven
-  `POLL`/`ANSWER`/`FINAL`/`REPORT` exchange runs every 1000 ms; the initiator computes raw
+  `POLL`/`ANSWER`/`FINAL`/`REPORT` exchange defaults to every 1000 ms; the initiator computes raw
   and corrected range from six timestamps after a matching report.
 - Compile-time antenna-delay calibration collects statistics at a hard-coded known distance.
   The disabled range-bias hook currently returns unmodified range.
 - `_write()` redirects `printf` to USB CDC; Qorvo logging also uses USART3 at 115200 baud.
   Readable `ds_twr.distance`/`ds_twr.corrected` logs coexist with successful-exchange JSON.
-- USB receive only re-arms the endpoint: no command parsing. `CDC_Transmit_FS()` can return
-  busy; logging is not a queued, loss-aware telemetry channel.
+- USB CDC accepts bounded control commands, processed in the main loop rather than the
+  USB receive callback. Commands pause/configure/resume the radio and return identified
+  acknowledgements. See the USB control contract below; UART application control is not implemented.
+  Ordinary range/debug telemetry is still not a loss-aware transport.
 
 ### ESP32 and host
 
@@ -55,9 +57,12 @@ DW3000 --SPI/IRQ--> STM32F405 initiator <--DS-TWR--> STM32F405 responder + DW300
   the project uses standard ESP-IDF CMake files. UART text logging is not safe for arbitrary binary frames.
 - The bridge has no authentication, encryption, discovery, buffering contract, or multi-client support.
   TCP-to-UART exists, but STM32 application commands are not parsed.
-- The small host supports demo, TCP, USB serial, and replay; it serves a dependency-free UI,
+- The small host supports demo, TCP, USB serial, dual USB serial, and replay; it serves a dependency-free UI,
   revisioned distance/position priors, rolling residual statistics, and NDJSON plus a manifest.
   Recordings include host timestamps/prior revisions, not firmware build identity.
+- Dual USB serial identifies the initiator and responder independently, coordinates radio
+  updates with acknowledgement/readback/rollback, and records configuration events.
+  Existing single-connection modes remain read-only for radio settings.
 
 Build/flash and monitor commands live in the [root README](../README.md);
 host-only setup and source selection live in the [host README](../host/README.md).
@@ -76,6 +81,63 @@ The host validates range records and ignores non-JSON debug lines. Raw range is 
 corrections and prior/model outputs are separate fields or files with revision provenance.
 Breaking schema changes require coordinated firmware/parser changes, a version bump, and fixtures.
 Unknown fields may be ignored. Do not confuse this implemented contract with the target below.
+
+The optional additive `radio_revision` uint32 identifies the firmware configuration
+active when a range was produced. The host preserves it through parsing, recording,
+and replay. Version 1 and existing required fields are unchanged; older fixtures without
+this field still work. Revisions restart at zero on boot; boot IDs remain future work.
+
+### USB radio control (implemented, protocol version 1)
+
+ASCII decimal integers, newline framing, request ID `id` in uint32 range:
+
+```text
+UWB <id> GET
+UWB <id> PAUSE
+UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power>
+UWB <id> RESUME
+```
+
+`SET` is permitted only while paused. Supported periods are 100-10000 ms, channels
+5/9, preambles 64/128/256/512/1024 symbols, and rates 850/6800 kbps. TX power is
+the raw uint32 DW3000 register, not a calibrated power in dBm. The UI displays it
+in hexadecimal; the USB protocol uses decimal. RF/throughput validation on real boards
+is still required, especially after channel changes.
+
+Successful commands and rejections return current board state:
+
+```json
+{"type":"control","v":1,"id":42,"ok":true,"board":1,"role":"tx","revision":1,"period_ms":200,"channel":9,"preamble":128,"data_rate":6800,"tx_power":2694881440,"running":false}
+```
+
+Rejections additionally carry `error`. The host correlates IDs and validates
+identity/state; uncorrelated replies never complete a pending operation.
+Control replies are consumed before range parsing and are not malformed telemetry.
+Write completion alone never means configuration succeeded.
+
+`--source dual-serial` requires two distinct USB paths configured locally, with
+`--serial-port` for the initiator and `--responder-port` for the responder. The host
+reads both states, pauses both, sets a shared revision/settings, verifies both by
+GET, and resumes RX before TX. Failures/cancellation trigger rollback using another
+revision. If rollback/readback fails, the host attempts to pause both and exposes
+unknown/unreachable states explicitly. This is coordinated best-effort control,
+not an atomic transaction across disconnected hardware.
+
+Control acknowledgement dispatch runs independently of telemetry delivery, with a
+bounded 300-line telemetry queue retaining USB arrival times for observed-rate
+calculation (queue draining is not mistaken for faster sampling). Slow dashboard sends have a deadline and failed
+viewers are closed. Queue overflow or discarded queued input is counted per board
+(`telemetry_dropped`) and displayed as discarded USB lines; it is not hidden as a
+successful acquisition. Serial writes and rollback cleanup settle before command/
+transaction locks are released, even if the requesting task is cancelled.
+
+`POST /api/radio` accepts `sampling_hz`, `channel`, `preamble`, `data_rate`, and
+`tx_power`; invalid values return 422, unavailable sources or failed coordination
+return 409. `/api/status` includes per-board radio state, busy/error flags, and
+`observed_hz` from recent successful sample arrivals (not device timing).
+Session `radio.ndjson` stores initial snapshots and before/applied/failed/cancelled
+events with board settings, revisions, host times, and errors. Raw measurements and
+previous graph samples remain unchanged.
 
 ### Planned richer protocol
 

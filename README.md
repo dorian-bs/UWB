@@ -59,6 +59,22 @@ recording. The display window does not change the host's 20-residual rolling cal
 Up to 2000 samples accumulate in the browser; reconnecting starts from the host's
 up-to-300-sample snapshot. Missing prior-derived values are not plotted as zero.
 
+### Change the physical radio while plotting
+
+With updated STM32 firmware on both boards, connect both USB CDC ports and run:
+
+```bash
+bash scripts/run_dashboard.sh --source dual-serial --serial-port "$UWB_TX_USB" --responder-port "$UWB_RX_USB"
+```
+
+The variables stand for your local initiator/responder device paths; keep those in
+ignored `LAB_NOTES.md`. The **Radio / sampling** panel changes ranging cadence,
+channel, preamble, data rate, and raw TX power on both boards, with acknowledgements
+and rollback if a change fails. Existing graph history is retained. Requested
+cadence and observed successful-sample rate are shown separately.
+Demo, replay, and single-board connections cannot change physical radio settings.
+See [dual-USB instructions and limitations](host/README.md#live-radio-settings-two-usb-connected-boards).
+
 ## Change host code
 
 ```bash
@@ -66,7 +82,8 @@ make verify   # ruff lint/format check + all host tests
 make fmt      # auto-format and auto-fix
 ```
 
-`make verify` needs no boards and takes under a second. Run it before committing host changes.
+`make verify` needs no boards. Radio tests compile small native C harnesses and use
+isolated virtual serial ports; a native C compiler is required. Run it before committing host changes.
 The dashboard logic tests also require Node.js 18+ (`brew install node` if missing);
 Node is only used for testing, not running the dashboard.
 

@@ -1,6 +1,6 @@
 # Implementation Status and Roadmap
 
-Implementation snapshot: **2026-09-28**. Documentation consolidated: **2026-10-13**.
+Baseline implementation snapshot: **2026-09-28**. Dual-USB radio controls and documentation updated: **2026-10-13**.
 This is a small vertical slice across phases 0-3, not full completion of those phases.
 Contracts and code ownership live in [ARCHITECTURE.md](ARCHITECTURE.md);
 scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md).
@@ -10,8 +10,17 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
 - `TxDebug`/`RxDebug` presets select STM32 board roles without source edits; initiator emits
   compact version-1 NDJSON after successful DS-TWR exchanges, preserving readable logs.
 - ESP32-S3 bridges UART/TCP in both directions; Wi-Fi/port use `menuconfig`.
-  Reverse transport exists, but STM32 application commands do not.
-- Python/FastAPI host supports demo, TCP, USB serial, and recorded-file replay through the same pipeline.
+  Reverse transport exists; new STM32 control commands are USB-only, not UART/TCP.
+- Python/FastAPI host supports demo, TCP, USB serial, dual USB serial, and recorded-file replay through the same pipeline.
+- Radio / sampling controls support physical channel, preamble, data rate, raw TX power,
+  and requested ranging rate with both STM32 boards connected over USB. The host pauses
+  both radios, requires acknowledged settings/readback, resumes RX before TX, and attempts
+  rollback on failure/cancellation. Unknown or paused states are visible. Demo/replay and
+  single-board sources cannot change radio settings. Defaults stay at ~1 Hz.
+  Requested cadence and observed successful sample rate are shown separately; the 0.1-10 Hz
+  command range is not certified throughput. Both boards require updated firmware.
+  Config snapshots/outcomes are recorded in `radio.ndjson`; additive `radio_revision`
+  is preserved in range parsing/recording/replay without changing compact telemetry v1.
 - Dependency-free browser UI shows range, expected distance, residual, rolling bias/spread,
   and health counters for samples, malformed lines, and missing sequences.
 - Compact experiment console overlays selectable raw/corrected/expected distances and
@@ -30,6 +39,13 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   use the current suite, not this historical count, as the authoritative test inventory.
 - Display-state, axis and preference tests use Node's built-in test runner through pytest,
   without browser libraries or frontend build tooling.
+- Radio tests cover validation, acknowledged application, mismatched readback, lost ACKs,
+  failed rollback, cancellation, and real pyserial acquisition on isolated virtual USB
+  ports. In-flight writes and rollback retain their locks through cancellation;
+  reachable boards restore independently, while incomplete pairs stay paused.
+  USB ACK handling is independent of bounded telemetry delivery; slow viewers are
+  closed, discarded lines are counted, and observed rates use preserved arrival times.
+  Native C tests exercise firmware control without an Arm build or physical boards.
 - Repeatable/idempotent macOS setup, environment checking, build/run/flash wrappers and top-level `make`
   commands support the project. Dependencies are declared in `host/pyproject.toml`; `.venv` holds the host
   environment. Setup includes ESP-IDF v5.5.5 and a user-local `~/.local/bin/idf.py` launcher.
@@ -46,7 +62,10 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   verify ESP32 UART pins, and discover its lab IP. Keep local addresses in ignored `LAB_NOTES.md`.
 - Only the initiator publishes ranges; debug text and JSON share output. No radio diagnostics or
   recorded firmware build identity yet; transport is not fully loss-aware.
-- Ranging is ~1 Hz for bring-up, not a measured research rate. Priors reset on host restart unless recorded.
+- Default ranging is ~1 Hz for bring-up, not a measured research rate. Runtime radio changes
+  and achievable rates still need hardware validation; no build/flash is implied by host tests.
+  Radio revisions reset on board reboot; record rebooted runs as separate sessions until
+  boot IDs exist. Priors reset on host restart unless recorded.
 - ESP32 accepts one unauthenticated client on a trusted lab network; local credentials must be set before flashing.
 
 ## Immediate priorities

@@ -1,0 +1,34 @@
+#ifndef QORVO_CONTROL_H
+#define QORVO_CONTROL_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+    uint32_t revision;
+    uint32_t period_ms;
+    uint32_t channel;
+    uint32_t preamble;
+    uint32_t data_rate;
+    uint32_t tx_power;
+    bool running;
+} qorvo_radio_state_t;
+
+void qorvo_control_init(uint8_t board, bool responder);
+/* Main-loop only: discard USB-session input/ACKs, not the actual radio state. */
+void qorvo_control_reset_transport(void);
+/* Main-loop only. Stops after one complete frame while its ACK is pending. */
+size_t qorvo_control_receive(const uint8_t *data, size_t len);
+void qorvo_control_process(void);
+bool qorvo_control_ack_pending(void);
+const qorvo_radio_state_t *qorvo_control_state(void);
+
+/* Fixed platform hooks; no radio or transmit work happens in USB callbacks. */
+void qorvo_control_read(qorvo_radio_state_t *state);
+void qorvo_control_pause(void);
+bool qorvo_control_apply(const qorvo_radio_state_t *requested);
+bool qorvo_control_resume(void);
+bool qorvo_control_send(const char *data, size_t len);
+
+#endif

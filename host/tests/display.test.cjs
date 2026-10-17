@@ -16,6 +16,30 @@ test("display helpers are available without a browser", () => {
   assert.equal(typeof api.axisBounds, "function");
 });
 
+test("radio form converts units and validates raw TX power without silent coercion", () => {
+  const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xA0A0A0A0" };
+  assert.deepEqual(plain(api.radioPayload(fields)), {
+    sampling_hz: 5, channel: 9, preamble: 128, data_rate: 6800, tx_power: 0xA0A0A0A0,
+  });
+  for (const changes of [
+    { sampling_hz: "" }, { sampling_hz: "0" }, { sampling_hz: "11" },
+    { sampling_hz: "NaN" }, { channel: "7" }, { preamble: "65" }, { data_rate: "110" },
+    { tx_power: "" }, { tx_power: "-1" }, { tx_power: "0x123456789" }, { tx_power: "not hex" },
+  ]) assert.throws(() => api.radioPayload({ ...fields, ...changes }));
+});
+
+test("radio controls require two connected, identified boards and respect busy state", () => {
+  assert.equal(api.radioAvailable({ supported: false }), false);
+  const radio = { supported: true, busy: false, boards: {
+    tx: { connected: true, state: { role: "tx", board: 1 } },
+    rx: { connected: true, state: { role: "rx", board: 2 } },
+  } };
+  assert.equal(api.radioAvailable(radio), true);
+  assert.equal(api.radioAvailable({ ...radio, busy: true }), false);
+  radio.boards.rx.state = null;
+  assert.equal(api.radioAvailable(radio), false);
+});
+
 test("preferences validate all controls and reject invalid manual limits", () => {
   assert.deepEqual(plain(api.validatePreferences(api.DEFAULTS)), plain(api.DEFAULTS));
   for (const changes of [

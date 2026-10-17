@@ -91,6 +91,30 @@ function createViewState(limit = 2000) {
   };
 }
 
+function radioPayload(fields) {
+  const payload = {};
+  for (const key of ["sampling_hz", "channel", "preamble", "data_rate"]) {
+    if (String(fields[key] ?? "").trim() === "") throw new Error("All radio settings are required.");
+    payload[key] = Number(fields[key]);
+  }
+  const power = String(fields.tx_power ?? "").trim();
+  if (!/^0x[0-9a-f]{1,8}$/i.test(power)) throw new Error("TX power must be a raw hexadecimal register, e.g. 0xA0A0A0A0.");
+  payload.tx_power = Number(power);
+  if (!Number.isFinite(payload.sampling_hz) || payload.sampling_hz < 0.1 || payload.sampling_hz > 10 ||
+      ![5, 9].includes(payload.channel) || ![64, 128, 256, 512, 1024].includes(payload.preamble) ||
+      ![850, 6800].includes(payload.data_rate)) {
+    throw new Error("Choose supported radio settings; requested rate must be 0.1-10 Hz.");
+  }
+  return payload;
+}
+
+function radioAvailable(radio) {
+  return Boolean(radio?.supported && !radio.busy &&
+    radio.boards?.tx?.connected && radio.boards?.rx?.connected &&
+    radio.boards.tx.state?.role === "tx" && radio.boards.rx.state?.role === "rx" &&
+    radio.boards.tx.state.board !== radio.boards.rx.state.board);
+}
+
 function startDashboard() {
   const byId = (id) => document.getElementById(id);
   const format = (value, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : "--";
@@ -98,6 +122,8 @@ function startDashboard() {
   let preferences = validatePreferences(DEFAULTS);
   let recording = false;
   let streamOpen = false;
+  let radioInitialized = false;
+  let radioSubmitting = false;
   const showError = (id, message) => {
     byId(id).textContent = message;
     byId(id).hidden = !message;
@@ -290,11 +316,43 @@ function startDashboard() {
       byId("record-button").textContent = recording ? "Stop recording" : "Start recording";
       byId("record-button").classList.toggle("stop", recording);
       showError("error-message", status.last_error || "");
+      updateRadioStatus(status);
     } catch (error) {
       byId("status-dot").classList.remove("connected");
       byId("connection-label").textContent = "Host unavailable";
       showError("error-message", error.message);
+      byId("radio-fields").disabled = true;
+      byId("radio-refresh").disabled = true;
     }
+  }
+  function loadRadioFields(state) {
+    const form = byId("radio-form");
+    form.elements.namedItem("sampling_hz").value = (1000 / state.period_ms).toFixed(3);
+    for (const key of ["channel", "preamble", "data_rate"]) form.elements.namedItem(key).value = state[key];
+    form.elements.namedItem("tx_power").value = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
+    radioInitialized = true;
+  }
+  function updateRadioStatus(status) {
+    const radio = status.radio;
+    const available = radioAvailable(radio);
+    byId("radio-fields").disabled = !available || radioSubmitting;
+    byId("radio-refresh").disabled = !available || radioSubmitting;
+    byId("observed-rate").textContent = `${format(status.observed_hz, 2)} successful samples/s`;
+    if (!radio?.supported) {
+      byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
+      return;
+    }
+    if (!radioInitialized && radio.boards.tx.state) loadRadioFields(radio.boards.tx.state);
+    const descriptions = ["tx", "rx"].map((role) => {
+      const board = radio.boards[role], state = board.state;
+      const lost = board.telemetry_dropped || 0;
+      if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}; USB lines discarded: ${lost}`;
+      const power = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
+      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${state.data_rate / 1000} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
+    });
+    byId("radio-state").textContent = descriptions.join("\n");
+    if (radio.last_error) showError("radio-error", radio.last_error);
+    if (radio.busy || radioSubmitting) byId("radio-result").textContent = "Coordinating both boards; waiting for acknowledgements...";
   }
   function connect() {
     const protocol = location.protocol === "https:" ? "wss" : "ws";
@@ -366,10 +424,39 @@ function startDashboard() {
       await refreshStatus();
     } catch (error) { showError("recording-error", error.message); }
   });
+  byId("radio-refresh").addEventListener("click", async () => {
+    try {
+      const status = await request("/api/status");
+      if (!radioAvailable(status.radio)) throw new Error("Both USB boards must be connected and identified.");
+      loadRadioFields(status.radio.boards.tx.state);
+      updateRadioStatus(status);
+    } catch (error) { showError("radio-error", error.message); }
+  });
+  byId("radio-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    showError("radio-error", "");
+    try {
+      const payload = radioPayload(Object.fromEntries(new FormData(event.target)));
+      radioSubmitting = true;
+      byId("radio-fields").disabled = true;
+      byId("radio-refresh").disabled = true;
+      byId("radio-result").textContent = "Pausing ranging and applying settings to both boards...";
+      await request("/api/radio", { method: "POST", body: JSON.stringify(payload) });
+      byId("radio-result").textContent = "Both boards acknowledged matching settings. Ranging resumed.";
+    } catch (error) {
+      byId("radio-result").textContent = "Configuration not confirmed; inspect board states below.";
+      showError("radio-error", error.message);
+    } finally {
+      radioSubmitting = false;
+      await refreshStatus();
+    }
+  });
   window.addEventListener("resize", drawAll);
   syncControls(); drawAll(); connect(); refreshStatus();
   setInterval(refreshStatus, 1000);
 }
 
-if (typeof module !== "undefined") module.exports = { DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData };
+if (typeof module !== "undefined") module.exports = {
+  DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
+};
 if (typeof document !== "undefined") startDashboard();

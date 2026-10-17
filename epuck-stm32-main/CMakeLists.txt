@@ -58,7 +58,7 @@ file(GLOB QORVO_DW3000_SOURCES
     ThirdParty/qorvo_dw3/driver/dw3000/*.c
 )
 
-file(GLOB QORVO_PLATFORM_SOURCES
+file(GLOB QORVO_PLATFORM_SOURCES CONFIGURE_DEPENDS
     ThirdParty/qorvo_dw3/platform/*.c
 )
 
