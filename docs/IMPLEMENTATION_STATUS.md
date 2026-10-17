@@ -27,7 +27,10 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   residual/bias/spread using separate distance and error axes. Display controls set sample
   window, plot height and lines/points. Both the main and optional second plot have all six
   trace choices and independent automatic/manual distance and error axis limits.
-  Experiment controls can be collapsed. Preferences stay in this browser; hiding Plot 2
+  Experiment controls can be collapsed. Radio / sampling and Geometry prior also have
+  independent keyboard-accessible dropdown sections, initially collapsed on page load;
+  closing them preserves form inputs without changing acquisition or recording.
+  Recording remains visible. Preferences stay in this browser; hiding Plot 2
   retains its selections and limits. Older saved settings preserve Plot 1 and initialize
   Plot 2 to residual only with automatic axes.
   Pause freezes plots/readouts only, not acquisition, recording or health counters.

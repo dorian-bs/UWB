@@ -115,7 +115,8 @@
 
     <aside id="experiment-controls" class="controls">
       <section aria-label="Physical radio configuration">
-        <div class="section-title"><h2>Radio / sampling</h2></div>
+        <details id="radio-panel" class="control-panel">
+        <summary><h2>Radio / sampling</h2></summary>
         <p class="plot-note">Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values.</p>
         <form id="radio-form">
           <fieldset id="radio-fields" disabled>
@@ -138,12 +139,14 @@
         <p id="radio-result" class="plot-note" role="status"></p>
         <p id="radio-state" class="plot-note" role="status">Waiting for source status...</p>
         <p id="radio-error" class="error" role="alert" hidden></p>
+        </details>
       </section>
       <section>
-        <div class="section-title">
+        <details id="prior-panel" class="control-panel">
+        <summary>
           <h2>Geometry prior</h2>
           <span id="prior-revision">No prior</span>
-        </div>
+        </summary>
         <form id="prior-form">
           <label>Input mode
             <select id="prior-mode" name="mode">
@@ -186,6 +189,7 @@
           <button type="submit">Apply prior</button>
           <p id="prior-error" class="error" role="alert" hidden></p>
         </form>
+        </details>
       </section>
 
       <section>

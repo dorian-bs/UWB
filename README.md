@@ -51,6 +51,9 @@ Open **Plot 1 axis limits** or **Plot 2 axis limits** for that plot's auto/manua
 Selections and limits are remembered separately, including when Plot 2 is hidden.
 The shared toolbar sets the last N samples, plot height, and lines/points for both plots.
 **Hide experiment controls** gives the plots more room.
+**Radio / sampling** and **Geometry prior** expand independently when you click their
+headings. Both start collapsed on page load. Collapsing them preserves entered values
+and does not stop acquisition or recording; the Recording section remains visible.
 
 **Pause view** freezes charts and measurement readouts while acquisition, recording and
 health counters continue. Resume returns to the latest samples. Display settings are
