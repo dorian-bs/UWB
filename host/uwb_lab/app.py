@@ -15,7 +15,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .analysis import METHODS, AnalysisRequest
+from .analysis_jobs import AnalysisService
 from .core import LabState, SessionRecorder
+from .experiments import BatchInput, BatchRunner
 from .radio import ControlError, RadioConfig, RadioControl, SampleRate, SerialBoard
 
 PACKAGE_DIR = Path(__file__).parent
@@ -37,10 +40,14 @@ class RecordingInput(BaseModel):
 
 
 class Runtime:
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Path | None = None) -> None:
         self.source = os.getenv("UWB_SOURCE", "demo")
         self.state = LabState()
-        self.recorder = SessionRecorder(DATA_DIR)
+        self.recorder = SessionRecorder(data_dir if data_dir is not None else DATA_DIR)
+        self.experiments = BatchRunner(self.recorder.root, self.recorder, health_snapshot=self.health)
+        self.analysis = AnalysisService(self.experiments)
+        self.operation_lock = asyncio.Lock()
+        self.experiment_task: asyncio.Task[None] | None = None
         self.clients: set[WebSocket] = set()
         self.connected = False
         self.last_error: str | None = None
@@ -57,13 +64,53 @@ class Runtime:
                     SerialBoard(tx_port, "tx"), SerialBoard(rx_port, "rx"), self.recorder
                 )
 
+    def health(self) -> dict[str, int]:
+        values = {
+            key: getattr(self.state, key)
+            for key in ("total_samples", "ignored_lines", "malformed_lines", "sequence_gaps")
+        }
+        if self.radio:
+            values.update(
+                {
+                    f"{role}_telemetry_dropped": board.status().get("telemetry_dropped", 0)
+                    for role, board in self.radio.boards.items()
+                }
+            )
+        return values
+
+    def set_connected(self, connected: bool, reason: str | None = None) -> None:
+        self.connected = connected
+        if not connected:
+            self.experiments.request_stop("interrupted", reason or "Acquisition disconnected")
+
+    @asynccontextmanager
+    async def controls(self, *, batch: bool = False) -> AsyncIterator[None]:
+        if self.operation_lock.locked() or (self.experiments.active and not batch):
+            raise HTTPException(status_code=409, detail="Experiment or configuration owns these controls")
+        async with self.operation_lock:
+            yield
+
     async def ingest(self, line: str, received_at: float | None = None) -> None:
         sample = self.state.add_line(line)
         if sample is None:
             return
         if sample["valid"]:
             self.sample_rate.add(received_at)
-        self.recorder.record_sample(sample)
+        try:
+            if self.experiments.active:
+                run_id = self.experiments.record_sample(sample)
+                if run_id is not None:
+                    self.analysis.observe(self.experiments.status()["batch_id"], run_id, sample)
+            else:
+                self.recorder.record_sample(sample)
+        except OSError as error:
+            logger.exception("Recording failed")
+            self.last_error = f"Recording failed: {error}"
+            if self.experiments.active:
+                try:
+                    self.experiments.stop("failed", self.last_error)
+                except OSError as close_error:
+                    logger.exception("Failed to finalize recording: %s", close_error)
         stale_clients: list[WebSocket] = []
         for client in tuple(self.clients):
             try:
@@ -92,6 +139,7 @@ class Runtime:
             "prior": self.state.prior.to_dict() if self.state.prior else None,
             "observed_hz": self.sample_rate.value(),
             "radio": self.radio.status() if self.radio else {"supported": False},
+            "experiment": self.experiments.status(),
         }
 
 
@@ -127,7 +175,7 @@ async def tcp_source() -> AsyncIterator[str]:
     while True:
         try:
             reader, writer = await asyncio.open_connection(host, port)
-            runtime.connected = True
+            runtime.set_connected(True)
             runtime.last_error = None
             while line := await reader.readline():
                 yield line.decode("utf-8", errors="replace")
@@ -136,7 +184,7 @@ async def tcp_source() -> AsyncIterator[str]:
         except (OSError, ValueError) as error:
             runtime.last_error = str(error)
         finally:
-            runtime.connected = False
+            runtime.set_connected(False, runtime.last_error)
         await asyncio.sleep(2)
 
 
@@ -148,7 +196,7 @@ async def serial_source() -> AsyncIterator[str]:
     while True:
         try:
             with serial.Serial(port, baudrate=baud, timeout=1) as connection:
-                runtime.connected = True
+                runtime.set_connected(True)
                 runtime.last_error = None
                 while True:
                     line = await asyncio.to_thread(connection.readline)
@@ -157,13 +205,13 @@ async def serial_source() -> AsyncIterator[str]:
         except (OSError, serial.SerialException) as error:
             runtime.last_error = str(error)
         finally:
-            runtime.connected = False
+            runtime.set_connected(False, runtime.last_error)
         await asyncio.sleep(2)
 
 
 async def replay_source() -> AsyncIterator[str]:
     path = Path(os.environ["UWB_REPLAY_FILE"])
-    runtime.connected = True
+    runtime.set_connected(True)
     try:
         while True:
             with path.open(encoding="utf-8") as replay:
@@ -188,7 +236,7 @@ async def replay_source() -> AsyncIterator[str]:
                     yield json.dumps(compact)
                     await asyncio.sleep(float(os.getenv("UWB_REPLAY_INTERVAL", "0.2")))
     finally:
-        runtime.connected = False
+        runtime.set_connected(False)
 
 
 async def acquisition_loop() -> None:
@@ -197,6 +245,7 @@ async def acquisition_loop() -> None:
             await dual_serial_acquisition()
         except (ControlError, OSError) as error:
             runtime.last_error = str(error)
+            runtime.set_connected(False, str(error))
         return
     sources = {"demo": demo_source, "tcp": tcp_source, "serial": serial_source, "replay": replay_source}
     factory = sources.get(runtime.source)
@@ -204,14 +253,14 @@ async def acquisition_loop() -> None:
         runtime.last_error = f"unknown source: {runtime.source}"
         return
     if runtime.source == "demo":
-        runtime.connected = True
+        runtime.set_connected(True)
     try:
         async for line in factory():
             await runtime.ingest(line)
     except asyncio.CancelledError:
         raise
     except Exception as error:
-        runtime.connected = False
+        runtime.set_connected(False, str(error))
         runtime.last_error = str(error)
 
 
@@ -219,14 +268,19 @@ async def dual_serial_acquisition() -> None:
     control = runtime.radio
     if control is None:
         return
-    tasks = [asyncio.create_task(board.run(runtime.ingest)) for board in control.boards.values()]
+    tasks = [
+        asyncio.create_task(
+            board.run(runtime.ingest, on_disconnect=lambda reason: runtime.set_connected(False, reason))
+        )
+        for board in control.boards.values()
+    ]
     try:
         while True:
             for task in tasks:
                 if task.done():
                     await task
                     raise ControlError("USB acquisition stopped unexpectedly")
-            runtime.connected = all(board.connected for board in control.boards.values())
+            runtime.set_connected(all(board.connected for board in control.boards.values()))
             if runtime.connected and not control.busy:
                 try:
                     await control.refresh()
@@ -241,7 +295,7 @@ async def dual_serial_acquisition() -> None:
                 runtime.last_error = "; ".join(errors) or "Waiting for both USB boards"
             await asyncio.sleep(2)
     finally:
-        runtime.connected = False
+        runtime.set_connected(False)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -249,14 +303,29 @@ async def dual_serial_acquisition() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if runtime.analysis.closing:
+        runtime.analysis = AnalysisService(runtime.experiments)
     runtime.task = asyncio.create_task(acquisition_loop())
-    yield
-    if runtime.task is not None:
-        runtime.task.cancel()
-        with suppress(asyncio.CancelledError):
-            await runtime.task
-    if runtime.recorder.active:
-        runtime.recorder.stop()
+    try:
+        yield
+    finally:
+        try:
+            if runtime.experiments.active:
+                runtime.experiments.stop("interrupted", "Host shutdown")
+        except OSError as error:
+            runtime.last_error = f"Shutdown recording failure: {error}"
+            logger.exception("Cannot finalize experiment during shutdown")
+        if runtime.experiment_task is not None:
+            await runtime.experiment_task
+        try:
+            await runtime.analysis.close()
+        finally:
+            if runtime.task is not None:
+                runtime.task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await runtime.task
+            if runtime.recorder.active:
+                runtime.recorder.stop()
 
 
 app = FastAPI(title="UWB Lab", lifespan=lifespan)
@@ -277,6 +346,16 @@ async def javascript() -> FileResponse:
     return FileResponse(PACKAGE_DIR / "static" / "app.js", media_type="text/javascript")
 
 
+@app.get("/experiments.js", response_class=FileResponse)
+async def experiment_javascript() -> FileResponse:
+    return FileResponse(PACKAGE_DIR / "static" / "experiments.js", media_type="text/javascript")
+
+
+@app.get("/analysis.js")
+async def analysis_javascript() -> FileResponse:
+    return FileResponse(PACKAGE_DIR / "static" / "analysis.js", media_type="text/javascript")
+
+
 @app.get("/api/status")
 async def status() -> dict[str, Any]:
     return runtime.status()
@@ -292,7 +371,8 @@ async def set_radio(payload: RadioConfig) -> dict[str, Any]:
     if runtime.radio is None:
         raise HTTPException(status_code=409, detail="Radio control requires the dual-serial hardware source")
     try:
-        return await runtime.radio.apply(payload)
+        async with runtime.controls():
+            return await runtime.radio.apply(payload)
     except ControlError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:
@@ -302,34 +382,97 @@ async def set_radio(payload: RadioConfig) -> dict[str, Any]:
 
 @app.post("/api/prior")
 async def set_prior(payload: PriorInput) -> dict[str, Any]:
-    try:
-        prior = runtime.state.set_prior(payload.model_dump())
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    runtime.recorder.record_prior(prior)
+    async with runtime.controls():
+        try:
+            prior = runtime.state.set_prior(payload.model_dump())
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        runtime.recorder.record_prior(prior)
     return prior.to_dict()
 
 
 @app.post("/api/recording/start")
 async def start_recording(payload: RecordingInput) -> dict[str, Any]:
-    try:
-        path = runtime.recorder.start(payload.name, runtime.source)
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    if runtime.state.prior:
-        runtime.recorder.record_prior(runtime.state.prior)
-    if runtime.radio:
-        runtime.radio.record("snapshot")
+    async with runtime.controls():
+        try:
+            path = runtime.recorder.start(payload.name, runtime.source)
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if runtime.state.prior:
+            runtime.recorder.record_prior(runtime.state.prior)
+        if runtime.radio:
+            runtime.radio.record("snapshot")
     return {"recording": True, "session": path.name}
 
 
 @app.post("/api/recording/stop")
 async def stop_recording() -> dict[str, Any]:
-    try:
-        path = runtime.recorder.stop()
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+    async with runtime.controls():
+        try:
+            path = runtime.recorder.stop()
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
     return {"recording": False, "session": path.name}
+
+
+@app.post("/api/experiments/start")
+async def start_experiment(payload: BatchInput) -> dict[str, Any]:
+    async with runtime.controls(batch=True):
+        if runtime.experiments.active or runtime.recorder.active:
+            raise HTTPException(status_code=409, detail="Another batch or recording is active")
+        if not runtime.connected or runtime.state.prior is None:
+            raise HTTPException(
+                status_code=409, detail="A connected source and configured prior are required"
+            )
+        if runtime.radio and runtime.radio.busy:
+            raise HTTPException(status_code=409, detail="Radio configuration is in progress")
+        if runtime.experiment_task is not None and not runtime.experiment_task.done():
+            runtime.experiment_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await runtime.experiment_task
+        try:
+            result = runtime.experiments.start(
+                payload,
+                source=runtime.source,
+                prior=runtime.state.prior,
+                radio_snapshot=runtime.radio.status() if runtime.radio else None,
+            )
+        except OSError as error:
+            logger.exception("Cannot start experiment storage")
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        runtime.experiment_task = asyncio.create_task(runtime.experiments.supervise())
+        return result
+
+
+@app.post("/api/experiments/stop")
+async def stop_experiment() -> dict[str, Any]:
+    async with runtime.controls(batch=True):
+        try:
+            runtime.experiments.stop("stopped", "Stopped by operator")
+        except OSError as error:
+            logger.exception("Cannot finalize experiment")
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return runtime.experiments.status()
+
+
+@app.get("/api/experiments")
+async def experiments() -> dict[str, Any]:
+    try:
+        return {"batches": runtime.experiments.list_batches()}
+    except (OSError, ValueError, KeyError) as error:
+        logger.exception("Cannot read experiment archives")
+        raise HTTPException(status_code=500, detail=f"Cannot read experiment archives: {error}") from error
+
+
+@app.get("/api/experiments/{batch_id}")
+async def experiment(batch_id: str) -> dict[str, Any]:
+    try:
+        return runtime.experiments.load_batch(batch_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Experiment not found") from error
+    except (OSError, ValueError, KeyError) as error:
+        logger.exception("Cannot read experiment")
+        raise HTTPException(status_code=500, detail=f"Cannot read experiment: {error}") from error
 
 
 @app.websocket("/ws")
@@ -342,3 +485,59 @@ async def websocket(websocket: WebSocket) -> None:
             await websocket.receive_text()
     except WebSocketDisconnect:
         runtime.clients.discard(websocket)
+
+
+@app.get("/api/analysis/methods")
+async def analysis_methods() -> dict[str, Any]:
+    return {"methods": METHODS, "parameters": AnalysisRequest.model_json_schema()}
+
+
+@app.post("/api/analysis/jobs", status_code=202)
+async def submit_analysis(payload: AnalysisRequest) -> dict[str, Any]:
+    try:
+        return runtime.analysis.submit(payload)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Experiment not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (OSError, KeyError) as error:
+        logger.exception("Cannot prepare analysis")
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.get("/api/analysis/jobs/{job_id}")
+async def analysis_job(job_id: str) -> dict[str, Any]:
+    try:
+        return runtime.analysis.get(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Analysis job not found or expired") from error
+
+
+@app.get("/api/experiments/{batch_id}/analyses")
+async def saved_analyses(batch_id: str) -> dict[str, Any]:
+    try:
+        runtime.experiments.load_batch(batch_id)
+        directory = runtime.experiments.batch_path(batch_id) / "analyses"
+        return {"analyses": [{"result_id": path.stem} for path in sorted(directory.glob("*.json"))]}
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Experiment not found") from error
+    except (OSError, ValueError, KeyError) as error:
+        logger.exception("Cannot read saved analyses")
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.get("/api/experiments/{batch_id}/analyses/{result_id}")
+async def saved_analysis(batch_id: str, result_id: str) -> dict[str, Any]:
+    if len(result_id) != 32 or any(character not in "0123456789abcdef" for character in result_id):
+        raise HTTPException(status_code=400, detail="Invalid result identity")
+    try:
+        base = runtime.experiments.batch_path(batch_id).resolve()
+        path = (base / "analyses" / f"{result_id}.json").resolve()
+        if not path.is_relative_to(base):
+            raise ValueError("Result path escapes the experiment")
+        return await asyncio.to_thread(lambda: json.loads(path.read_text(encoding="utf-8")))
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Saved analysis not found") from error
+    except (OSError, ValueError) as error:
+        logger.exception("Cannot read saved analysis")
+        raise HTTPException(status_code=500, detail=str(error)) from error

@@ -89,11 +89,34 @@ dl div { display: flex; gap: 8px; }
 dt { color: var(--muted); }
 dd { margin: 0; font: 600 13px ui-monospace, monospace; }
 .error { margin: 8px 0; padding: 6px 8px; color: #8f2621; background: #fae9e7; border-left: 3px solid var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.analysis-panel { background: var(--panel); border: 1px solid var(--line); padding: 10px; margin-bottom: 10px; }
+.analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
+#experiment-stop { margin-top: 8px; }
+.form-fields { display: grid; gap: 8px; }
+.form-fields > details > .form-fields { margin-top: 8px; }
+#experiment-form { margin-top: 8px; }
+#experiment-form .coordinate-row { grid-template-columns: 1fr 1fr; }
+.analysis-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.analysis-card { min-width: 0; padding: 10px; border: 1px solid var(--line); background: var(--panel); }
+.analysis-card h3 { font-size: 13px; margin: 0 0 8px; }
+.analysis-card canvas { height: 220px; margin-top: 8px; }
+.analysis-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.analysis-metrics span { display: block; font-size: 11px; color: var(--muted); }
+.analysis-metrics strong { font: 600 13px ui-monospace, monospace; overflow-wrap: anywhere; }
+.analysis-notice { padding: 8px; background: #fff4dc; color: #775019; font-size: 12px; }
+.analysis-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.analysis-table th, .analysis-table td { padding: 6px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.analysis-table th { color: var(--muted); font-weight: 500; }
+.table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.comparison-title { margin-top: 14px; }
+@media (max-width: 1150px) { .analysis-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .controls { width: 100%; }
 }
 @media (max-width: 520px) {
+  .analysis-selection { grid-template-columns: minmax(0, 1fr); }
   .topbar { align-items: start; flex-direction: column; padding: 8px; }
   .workspace { padding: 8px; gap: 8px; }
   .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }

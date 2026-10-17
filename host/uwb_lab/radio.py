@@ -222,7 +222,12 @@ class SerialBoard:
             with suppress(asyncio.CancelledError):
                 await delivery
 
-    async def run(self, ingest: Callable[[str, float], Awaitable[None]]) -> None:
+    async def run(
+        self,
+        ingest: Callable[[str, float], Awaitable[None]],
+        *,
+        on_disconnect: Callable[[str], None] | None = None,
+    ) -> None:
         while True:
             reader: asyncio.Task[None] | None = None
             try:
@@ -238,6 +243,8 @@ class SerialBoard:
                 self.error = f"{self.role}: {error}"
             finally:
                 self.connected = False
+                if on_disconnect is not None:
+                    on_disconnect(self.error or f"{self.role}: USB reader disconnected")
                 self.snapshot = None
                 for future in self.pending.values():
                     if not future.done():

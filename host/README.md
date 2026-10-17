@@ -93,6 +93,68 @@ uwb-lab --source replay --replay-file data/sessions/SESSION/telemetry.ndjson
 
 Recordings are written under `data/sessions/` and are intentionally ignored by Git.
 
+## Repeated experiments and noise analysis
+
+1. Start a source and apply a distance or position prior in **Geometry prior**.
+2. In **Experiment setup**, choose a name, run length in seconds, integer run count,
+   and interval between runs. The current prior and available radio state are
+   snapshotted when **Start batch** is pressed.
+3. Inspect run/interval progress. The host owns the schedule: refreshing or closing
+   the browser does not stop it. **Stop batch** preserves completed runs and marks
+   an active run incomplete. Detected source disconnection or host shutdown also
+   interrupts the batch; it does not automatically resume.
+4. Choose analysis methods in **Analysis setup** and a dataset/scope below the
+   signal plots. Select the current run, one saved run, or all runs pooled.
+   **Recompute full closed dataset** saves a reproducible full-data result.
+
+Prior edits, radio changes, and manual recording are unavailable throughout a
+batch, including its intervals. A run with no valid measurements fails the batch.
+Consecutive automatic recordings do not imply independent physical experiments.
+
+The initial methods are residual statistics, density histogram with Gaussian
+baseline, sample-lag autocorrelation, Welch PSD, and a seeded 1-6-component GMM.
+Choose either raw or corrected range minus the **recorded** expected distance.
+These residuals include prior/geometry errors; mixture components are not
+automatically LOS/NLOS classes. No outlier trimming or correction is applied.
+The default demo varies its true distance, so its residuals are not a stationary
+sensor-noise reference.
+
+Live diagnostics use at most 2000 eligible samples and refresh through one
+coalescing background worker. Full-selection counts, bias, sample spread,
+MAE/RMSE and bounds are labelled separately from window quantiles/fits. The
+existing signal display window and its 20-sample rolling **population** spread
+are unchanged; analysis sample spread uses `ddof=1`.
+
+PSD requires at least 32 valid samples, consecutive sequences, increasing device
+times, and all timing deltas within 5% of their median. Frequency comes from
+device timing, not the requested rate. Ineligible data shows a reason instead
+of interpolation or an unjustified FFT. ACF and PSD stay separate for each run,
+even when distribution fitting pools the runs. At roughly 1 Hz, allow at least
+32 seconds and enough successful measurements for a spectrum.
+
+Each batch is portable:
+
+```text
+data/sessions/experiments/<batch-id>/
+  manifest.json
+  intervals.ndjson
+  runs/<session-id>/{manifest.json,telemetry.ndjson,priors.ndjson,radio.ndjson}
+  analyses/<result-id>.json
+```
+
+All parsed range measurements, including invalid and inter-run measurements,
+are retained independently of live-window limits. Interval samples are excluded
+from ordinary run analysis. This is not a lossless capture of debug bytes or
+measurements lost before parsing; existing health counters still matter.
+Unfinished batches reopen as interrupted after a process crash. Saved analyses
+retain source hashes, run states, prior references, parameters, seed and
+numerical-library versions without rewriting telemetry.
+
+The approved [design](../docs/superpowers/specs/2026-10-17-repeated-experiments-and-noise-analysis-design.md)
+and [implementation plan](../docs/superpowers/plans/2026-10-17-repeated-experiments-and-noise-analysis.md)
+describe the contracts. Moving priors, changing conditions between runs, and
+classification/model evaluation remain future work.
+
 ## Firmware setup
 
 Build the two STM32 roles from `epuck-stm32-main/`:

@@ -1,6 +1,7 @@
 # Architecture, Codebase, and Data Contract
 
-**Current:** baseline documented on 2026-09-28; dual-USB radio controls added on 2026-10-13.
+**Current:** baseline documented on 2026-09-28; dual-USB controls added on 2026-10-13;
+repeated experiments and noise analysis added on 2026-10-17.
 **Planned:** richer protocol, storage, and experiment-console requirements below.
 See [implementation status and roadmap](IMPLEMENTATION_STATUS.md) for delivery order.
 
@@ -66,6 +67,50 @@ DW3000 --SPI/IRQ--> STM32F405 initiator <--DS-TWR--> STM32F405 responder + DW300
 
 Build/flash and monitor commands live in the [root README](../README.md);
 host-only setup and source selection live in the [host README](../host/README.md).
+
+## Experiment and analysis host extension
+
+`experiments.py` owns monotonic run/interval deadlines and a portable batch
+manifest. It reuses `SessionRecorder` rather than replacing the recorder object
+held by radio control. Prior, manual-recording, radio-apply and batch operations
+share an API ownership guard; prior/radio changes stay locked during intervals.
+Source disconnections latch an interruption immediately, including either USB
+board's disconnect transition, independently of dashboard polling.
+
+Batch storage under `data/sessions/experiments/<batch-id>/` contains a manifest,
+separate `runs/<session-id>/` directories using the existing NDJSON session
+format, inter-run samples in `intervals.ndjson`, and separate full-data results
+under `analyses/`. Manifests/results use atomic replacement. Interrupted/failed
+runs are not marked completed; unfinished archives reopen as interrupted.
+Parsed invalid samples remain archived but are excluded from analysis.
+
+`analysis.py` provides typed request/result shapes and NumPy/SciPy/scikit-learn
+diagnostics. `analysis_jobs.py` snapshots bounded live windows, directly loads
+saved records with their original expected values, and executes one background
+job plus at most one replaceable pending request. It never replays saved data
+through the current global prior. Temporal diagnostics remain per-run; pooled
+distribution fits are sample-weighted.
+
+Results compose metrics, tables and labelled series (`line`, `bars`, `stems`,
+`points`), rendered by dependency-free `analysis.js`; `experiments.js` supplies
+the batch controls. Existing signal plot preferences and pause-view behavior
+are separate. Numerical work does not run in the acquisition event loop.
+
+| Endpoint | Implemented purpose |
+| --- | --- |
+| `POST /api/experiments/start`, `/stop` | Start/stop host-owned scheduling |
+| `GET /api/experiments` | Discover saved batches |
+| `GET /api/experiments/{batch_id}` | Batch manifest and individual run summaries |
+| `GET /api/analysis/methods` | Method catalogue and request parameter schema |
+| `POST /api/analysis/jobs` | Submit a typed selection/recipe; returns 202 with job ID/key |
+| `GET /api/analysis/jobs/{job_id}` | Job state, explicit failures, typed numerical results |
+| `GET /api/experiments/{batch_id}/analyses` | Discover full-data analysis artifacts |
+| `GET /api/experiments/{batch_id}/analyses/{result_id}` | Read a saved reproducible result |
+
+Saved results retain source SHA-256, selected runs/outcomes, raw/corrected field,
+prior revisions, complete parameters/seed, window/full-data mode, analysis
+version and numerical-library versions. No raw fields are overwritten and the
+firmware compact version-1 record is unchanged.
 
 ## Data contract
 

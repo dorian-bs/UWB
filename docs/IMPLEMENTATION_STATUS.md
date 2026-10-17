@@ -1,12 +1,29 @@
 # Implementation Status and Roadmap
 
-Baseline implementation snapshot: **2026-09-28**. Dual-USB radio controls and documentation updated: **2026-10-13**.
+Baseline implementation snapshot: **2026-09-28**. Dual-USB radio controls: **2026-10-13**.
+Repeated experiments and noise analysis: **2026-10-17**.
 This is a small vertical slice across phases 0-3, not full completion of those phases.
 Contracts and code ownership live in [ARCHITECTURE.md](ARCHITECTURE.md);
 scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md).
 
 ## Working now
 
+- Host-owned experiment batches schedule identical configured timed runs with
+  optional intervals, snapshot a fixed distance/position prior and radio state,
+  and preserve separate run sessions plus interval measurements. Prior/radio
+  edits and manual recording are locked throughout a batch. Browser closure
+  does not stop scheduling; stop/disconnect/shutdown preserves incomplete
+  outcomes, and empty runs fail explicitly. Manifests use atomic replacement;
+  saved unfinished batches reopen as interrupted without automatic resumption.
+- Selectable noise-analysis cards provide summary statistics, histogram/Gaussian
+  baseline, sample-lag ACF, timing-qualified Welch PSD, and seeded configurable
+  GMM fitting with parameters/convergence/AIC/BIC. Raw/corrected residuals,
+  current/saved runs and pooled distributions share one Python implementation.
+  Live windows are bounded independently of signal plots; full-selection moments
+  and window quantiles/fits are explicitly labelled. One background worker
+  coalesces pending analysis requests. Closed-file recomputation saves source
+  hashes, recipe, prior references and numerical versions separately from raw data.
+  ACF/PSD never concatenate runs; irregular/gapped spectra show an explicit reason.
 - `TxDebug`/`RxDebug` presets select STM32 board roles without source edits; initiator emits
   compact version-1 NDJSON after successful DS-TWR exchanges, preserving readable logs.
 - ESP32-S3 bridges UART/TCP in both directions; Wi-Fi/port use `menuconfig`.
@@ -53,7 +70,20 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   commands support the project. Dependencies are declared in `host/pyproject.toml`; `.venv` holds the host
   environment. Setup includes ESP-IDF v5.5.5 and a user-local `~/.local/bin/idf.py` launcher.
 
-### Previously verified (not reverified by this documentation cleanup)
+### Experiment-workspace verification (2026-10-17)
+
+- `make verify`: Ruff check/format and all 61 pytest tests pass, including
+  the Node UI tests, native firmware checks and real HTTP smoke tests.
+- Browser checks: two runs with an interval, pooled full-data analysis, separate
+  per-run temporal results, raw/corrected selection, method toggles, saved-data
+  reopening after restart, and 390-pixel layout without page overflow.
+- Host scheduling completes both runs while the dashboard is navigated away.
+- Code-review regressions cover failed run finalization and delayed partial
+  results for explicitly selected runs at closure.
+- One pre-existing Starlette/httpx deprecation warning remains. These checks do
+  not certify RF behavior, hardware rates, or physical statistical independence.
+
+### Previously verified (hardware not reverified by this host change)
 
 - STM32 `TxDebug`/`RxDebug` and ESP32-S3 builds with ESP-IDF v5.5.5.
 - Host tests; demo streaming, prior updates, recording, and replay in the browser.
@@ -69,13 +99,19 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   and achievable rates still need hardware validation; no build/flash is implied by host tests.
   Radio revisions reset on board reboot; record rebooted runs as separate sessions until
   boot IDs exist. Priors reset on host restart unless recorded.
+- Batch conditions are configured identically, not physically reset or certified
+  independent. Moving/multiple priors, automated condition sweeps and formal
+  model validation remain future work. Archives retain parsed measurements,
+  not all original debug bytes or samples lost upstream. The demo includes
+  changing geometry and is not a stationary noise reference.
 - ESP32 accepts one unauthenticated client on a trusted lab network; local credentials must be set before flashing.
 
 ## Immediate priorities
 
 1. Test the complete hardware chain, collect fixed-distance LOS recordings, and calibrate antenna delays.
 2. Add timestamped LOS/NLOS event labels and DW3000 quality diagnostics.
-3. Add offline histograms, bias/stddev, and autocorrelation.
+3. Collect independent repeated recordings and evaluate the implemented noise
+   diagnostics before selecting more complex models or calibration corrections.
 4. Establish a simple LOS/NLOS baseline before HMM/change-point comparisons.
    GP/autoregressive noise models and downstream localization evaluation depend on sufficient data.
 

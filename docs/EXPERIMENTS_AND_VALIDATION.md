@@ -30,6 +30,46 @@ and manual positions carry their own uncertainty; an unverified estimate is only
 Timestamp prior revisions without retroactively changing source records.
 For motion, prefer a shared ground-truth trigger; otherwise estimate/report temporal alignment uncertainty.
 
+## Repeated-run console and initial diagnostics
+
+The host now schedules fixed-duration repetitions with an interval between
+runs. Every run shares the prior and available radio configuration snapshotted
+at batch start. Interval measurements are retained separately but excluded
+from run statistics/fits. Stop/disconnect/shutdown preserves incomplete status;
+no automatic physical reset or independence guarantee is implied.
+
+Use the [host workflow](../host/README.md#repeated-experiments-and-noise-analysis)
+to select live or saved batches. Live fits/quantiles use a labelled bounded
+window of at most 2000 eligible samples; cheap full-selection moments remain
+separate. Full-data recomputation uses closed files and saves its recipe,
+source fingerprint, outcomes, prior references, seed and library versions.
+
+| Method | Implemented semantics |
+| --- | --- |
+| Summary | Bias, sample standard deviation (`ddof=1`), median, MAE/RMSE, bounds and linear-interpolated P95/P99 absolute error |
+| Histogram / Gaussian | Density-normalized histogram and single-Gaussian maximum-likelihood baseline; degenerate constant fits are flagged |
+| ACF | Demeaned, zero-lag-normalized biased autocorrelation against eligible-sample lag; constants unavailable, sequence gaps flagged |
+| Welch PSD | Hann window, constant detrending, density in m²/Hz, segment `min(256,n)`, half overlap; at least 32 samples |
+| GMM | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads, likelihood, AIC/BIC |
+
+PSD requires increasing device times, consecutive sequences and every time
+delta within 5% of its median. The median device-time delta determines sample
+frequency; the requested radio rate is never substituted. Gaps, resets,
+irregular timing and insufficient data produce an explicit unavailable reason,
+not interpolated or time-compressed samples. Neither PSD nor ACF concatenates
+different runs. Pooled distributions weight samples, not sessions equally.
+
+Choose `raw_m - expected_m` or `corrected_m - expected_m` using the expected
+value stored with each sample. Invalid/no-reference/non-finite measurements
+are excluded with counts, not silently removed from the archive. No outliers
+are trimmed. Prior uncertainty is not subtracted from observed variance.
+
+GMM components are descriptive density components, not verified propagation
+classes. AIC/BIC on the fitted dataset are exploratory model diagnostics, not
+held-out classification performance. The default demo varies geometry and is
+not stationary sensor-noise ground truth. Independent recordings and the
+session-grouped evaluation rules below are still necessary for research claims.
+
 ## Radio and sampling parameter reference
 
 The **Radio / sampling** panel changes physical DW3000 settings on both USB-connected

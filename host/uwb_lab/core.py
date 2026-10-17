@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import statistics
+import uuid
 from collections import deque
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +16,18 @@ from typing import Any
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def write_json_atomic(path: Path, value: object) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -200,12 +215,14 @@ class SessionRecorder:
     def active(self) -> bool:
         return self.session_dir is not None
 
-    def start(self, name: str, source: str) -> Path:
+    def start(self, name: str, source: str, *, parent: Path | None = None) -> Path:
         if self.active:
             raise ValueError("a recording is already active")
         safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip()).strip("-") or "session"
         stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        session_dir = self.root / f"{stamp}-{safe_name}"
+        session_dir = (parent if parent is not None else self.root) / (
+            f"{stamp}-{safe_name}-{uuid.uuid4().hex[:8]}"
+        )
         session_dir.mkdir(parents=True, exist_ok=False)
         self.started_at = utc_now()
         manifest = {
@@ -215,10 +232,13 @@ class SessionRecorder:
             "started_at": self.started_at,
             "completed": False,
         }
-        (session_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        self.telemetry_file = (session_dir / "telemetry.ndjson").open("a", encoding="utf-8")
-        self.priors_file = (session_dir / "priors.ndjson").open("a", encoding="utf-8")
-        self.radio_file = (session_dir / "radio.ndjson").open("a", encoding="utf-8")
+        write_json_atomic(session_dir / "manifest.json", manifest)
+        with ExitStack() as stack:
+            telemetry = stack.enter_context((session_dir / "telemetry.ndjson").open("a", encoding="utf-8"))
+            priors = stack.enter_context((session_dir / "priors.ndjson").open("a", encoding="utf-8"))
+            radio = stack.enter_context((session_dir / "radio.ndjson").open("a", encoding="utf-8"))
+            self.telemetry_file, self.priors_file, self.radio_file = telemetry, priors, radio
+            stack.pop_all()
         self.sample_count = 0
         self.session_dir = session_dir
         return session_dir
@@ -239,25 +259,35 @@ class SessionRecorder:
             self.radio_file.write(json.dumps(event, separators=(",", ":")) + "\n")
             self.radio_file.flush()
 
-    def stop(self) -> Path:
+    def stop(self, *, completed: bool = True, reason: str | None = None) -> Path:
         if self.session_dir is None:
             raise ValueError("no recording is active")
         session_dir = self.session_dir
-        if self.telemetry_file is not None:
-            self.telemetry_file.close()
-        if self.priors_file is not None:
-            self.priors_file.close()
-        if self.radio_file is not None:
-            self.radio_file.close()
-        self.telemetry_file = None
-        self.priors_file = None
-        self.radio_file = None
-        manifest_path = session_dir / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest.update({"completed": True, "ended_at": utc_now(), "sample_count": self.sample_count})
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        self.session_dir = None
-        self.telemetry_file = None
-        self.priors_file = None
-        self.sample_count = 0
+        errors: list[OSError] = []
+        try:
+            for stream in (self.telemetry_file, self.priors_file, self.radio_file):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError as error:
+                        errors.append(error)
+            manifest_path = session_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.update(
+                {
+                    "completed": completed and not errors,
+                    "ended_at": utc_now(),
+                    "sample_count": self.sample_count,
+                    "reason": "; ".join(str(error) for error in errors) if errors else reason,
+                }
+            )
+            write_json_atomic(manifest_path, manifest)
+            if errors:
+                raise OSError(f"Recording close failed: {manifest['reason']}") from errors[0]
+        finally:
+            self.session_dir = None
+            self.telemetry_file = None
+            self.priors_file = None
+            self.radio_file = None
+            self.sample_count = 0
         return session_dir

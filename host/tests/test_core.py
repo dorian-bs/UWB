@@ -65,3 +65,37 @@ class CoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_incomplete_run_and_unique_recording_destinations(tmp_path):
+    recorder = SessionRecorder(tmp_path)
+    parent = tmp_path / "experiments" / "batch-a" / "runs"
+    first = recorder.start("run", "demo", parent=parent)
+    recorder.stop(completed=False, reason="Acquisition disconnected")
+    manifest = json.loads((first / "manifest.json").read_text())
+    assert manifest["completed"] is False
+    assert manifest["reason"] == "Acquisition disconnected"
+    second = recorder.start("run", "demo", parent=parent)
+    assert second != first
+    recorder.stop()
+
+
+def test_failed_recording_start_closes_partial_files(tmp_path, monkeypatch):
+    original = Path.open
+    opened = []
+
+    def fail_prior(path, *args, **kwargs):
+        if path.name == "priors.ndjson":
+            raise OSError("disk unavailable")
+        stream = original(path, *args, **kwargs)
+        opened.append(stream)
+        return stream
+
+    recorder = SessionRecorder(tmp_path)
+    monkeypatch.setattr(Path, "open", fail_prior)
+    import pytest
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        recorder.start("run", "demo")
+    assert not recorder.active
+    assert all(stream.closed for stream in opened)

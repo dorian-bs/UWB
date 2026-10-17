@@ -1,0 +1,288 @@
+const ANALYSIS_DEFAULTS = {
+  field: "corrected_m", methods: ["statistics", "histogram", "acf", "psd", "gmm"],
+  window_size: 2000, histogram_bins: 30, max_lag: 30, components: 2, seed: 0,
+};
+
+function validateAnalysisPreferences(value, methodIds = ANALYSIS_DEFAULTS.methods) {
+  if (!value || typeof value !== "object") throw new Error("Invalid analysis preferences");
+  const result = {...ANALYSIS_DEFAULTS, ...value};
+  if (!["raw_m", "corrected_m"].includes(result.field) || !Array.isArray(result.methods) ||
+      result.methods.some((method) => !methodIds.includes(method))) throw new Error("Invalid analysis methods");
+  for (const [name, minimum, maximum] of [
+    ["window_size", 1, 2000], ["histogram_bins", 1, 200], ["max_lag", 1, 2000],
+    ["components", 1, 6], ["seed", 0, 4294967295],
+  ]) {
+    if (!Number.isInteger(result[name]) || result[name] < minimum || result[name] > maximum) {
+      throw new Error(`Invalid ${name.replaceAll("_", " ")}`);
+    }
+  }
+  result.methods = [...new Set(result.methods)];
+  return result;
+}
+
+function resultMatches(selection, job) {
+  return selection.jobId === job.job_id && selection.recipeKey === job.recipe_key;
+}
+
+function chartBounds(series) {
+  const xs = [], ys = [0];
+  for (const curve of series) {
+    if (curve.x.length !== curve.y.length) throw new Error("Mismatched analysis coordinates");
+    for (let index = 0; index < curve.x.length; index++) {
+      if (!Number.isFinite(curve.x[index]) || !Number.isFinite(curve.y[index])) {
+        throw new Error("Non-finite analysis coordinates");
+      }
+      xs.push(curve.x[index]); ys.push(curve.y[index]);
+    }
+  }
+  if (!xs.length) throw new Error("No plot coordinates");
+  const extent = (values) => {
+    let min = values[0], max = values[0];
+    for (const value of values) { min = Math.min(min, value); max = Math.max(max, value); }
+    const padding = max > min ? (max - min) * 0.06 : Math.max(Math.abs(min) * 0.05, 0.001);
+    return { min: min - padding, max: max + padding };
+  };
+  return {x: extent(xs), y: extent(ys)};
+}
+
+function drawAnalysisChart(canvas, plot) {
+  const bounds = chartBounds(plot.series);
+  const width = canvas.clientWidth || 400, height = 220, ratio = window.devicePixelRatio || 1;
+  canvas.width = width * ratio; canvas.height = height * ratio;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const area = {left: 66, right: width - 12, top: 12, bottom: 178};
+  const x = (value) => area.left + (value - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
+  const y = (value) => area.bottom - (value - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
+  const label = (value) => Number(value.toPrecision(3)).toString();
+  context.fillStyle = "#fff"; context.fillRect(0, 0, width, height);
+  context.font = "10px system-ui"; context.lineWidth = 1;
+  for (let tick = 0; tick <= 4; tick++) {
+    const value = bounds.y.min + tick * (bounds.y.max - bounds.y.min) / 4;
+    context.strokeStyle = "#e5ebe7"; context.beginPath(); context.moveTo(area.left, y(value)); context.lineTo(area.right, y(value)); context.stroke();
+    context.fillStyle = "#52615e"; context.textAlign = "right"; context.fillText(label(value), area.left - 5, y(value) + 3);
+    const xv = bounds.x.min + tick * (bounds.x.max - bounds.x.min) / 4;
+    context.textAlign = "center"; context.fillText(label(xv), x(xv), area.bottom + 15);
+  }
+  const colors = ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#d47729"];
+  plot.series.forEach((curve, index) => {
+    context.strokeStyle = context.fillStyle = colors[index % colors.length];
+    context.lineWidth = 1.6; context.beginPath();
+    const barWidth = curve.x.length > 1 ? Math.max(1, Math.abs(x(curve.x[1]) - x(curve.x[0])) * 0.85) : 10;
+    curve.x.forEach((value, point) => {
+      const px = x(value), py = y(curve.y[point]);
+      if (curve.style === "bars") context.fillRect(px - barWidth / 2, Math.min(py, y(0)), barWidth, Math.max(1, Math.abs(y(0) - py)));
+      else if (curve.style === "stems") { context.moveTo(px, y(0)); context.lineTo(px, py); }
+      else if (curve.style === "points") { context.moveTo(px + 2, py); context.arc(px, py, 2, 0, 2 * Math.PI); }
+      else if (point === 0) context.moveTo(px, py);
+      else context.lineTo(px, py);
+    });
+    context.stroke();
+  });
+  context.fillStyle = "#52615e"; context.textAlign = "center";
+  context.fillText(plot.x_label, width / 2, 214);
+  context.save(); context.translate(12, 95); context.rotate(-Math.PI / 2);
+  context.fillText(plot.y_label, 0, 0); context.restore();
+}
+
+function startAnalysisPanel({request, showError}) {
+  const byId = (id) => document.getElementById(id);
+  const storageKey = "uwb-analysis-v1";
+  let preferences = validateAnalysisPreferences(ANALYSIS_DEFAULTS);
+  let catalogue = null, status = null, batchesKey = null, currentKey = null;
+  let selection = null, generation = 0, busy = false, dirty = true, lastComputed = 0;
+  let mode = "live", plots = [], timer = null;
+  const format = (value) => value == null ? "--" : typeof value === "number" ? Number(value.toPrecision(6)).toString() : String(value);
+  const node = (tag, text, className) => {
+    const element = document.createElement(tag);
+    if (text != null) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+  };
+  function table(columns, rows) {
+    const wrapper = node("div", null, "table-scroll");
+    const element = node("table", null, "analysis-table"), head = node("thead"), heading = node("tr");
+    columns.forEach((column) => heading.append(node("th", column)));
+    head.append(heading); element.append(head);
+    const body = node("tbody");
+    rows.forEach((row) => { const tr = node("tr"); row.forEach((value) => tr.append(node("td", format(value)))); body.append(tr); });
+    element.append(body); wrapper.append(element);
+    return wrapper;
+  }
+  function invalidate() {
+    generation++; selection = null; dirty = true; lastComputed = 0;
+    byId("analysis-cards").replaceChildren(); plots = [];
+    byId("analysis-state").textContent = "Selection changed; awaiting computation";
+  }
+  function render(output) {
+    plots = [];
+    byId("analysis-source").textContent =
+      `${output.mode === "live" ? "Provisional window" : "Full closed data"}: ${output.included_count} eligible samples; exclusions ${JSON.stringify(output.excluded)}. ` +
+      `${preferences.field} - recorded expected distance. Batch ${output.provenance.batch_outcome}. ` +
+      `Source ${output.provenance.source_sha256.slice(0, 12)}; ${output.provenance.analysis_version}. Pooled distributions are sample-weighted.`;
+    const container = byId("analysis-cards");
+    container.replaceChildren();
+    for (const item of output.results) {
+      const card = node("article", null, "analysis-card");
+      card.dataset.method = item.method;
+      card.append(node("h3", `${item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
+      const result = item.result;
+      if (result.status !== "ok") card.append(node("p", `${result.status}: ${result.reason}`, "analysis-notice"));
+      const metrics = node("div", null, "analysis-metrics");
+      for (const metric of result.metrics) {
+        const cell = node("div");
+        cell.append(node("span", metric.label), node("strong", `${format(metric.value)} ${metric.unit}`));
+        metrics.append(cell);
+      }
+      if (result.metrics.length) card.append(metrics);
+      for (const value of result.tables) card.append(table(value.columns, value.rows));
+      for (const plot of result.plots) {
+        const canvas = node("canvas");
+        canvas.setAttribute("aria-label", `${item.label}: ${plot.x_label}; ${plot.y_label}`);
+        card.append(canvas, node("p", plot.series.map((curve) => curve.label).join(" / "), "plot-note"));
+        plots.push({canvas, plot});
+      }
+      result.warnings.forEach((warning) => card.append(node("p", warning, "plot-note")));
+      container.append(card);
+    }
+    if (!output.results.length) container.append(node("p", "Select one or more analysis methods.", "plot-note"));
+    plots.forEach(({canvas, plot}) => drawAnalysisChart(canvas, plot));
+  }
+  function loadControls() {
+    for (const key of ["field", "window_size", "histogram_bins", "max_lag", "components", "seed"]) {
+      byId("analysis-settings").querySelector(`[name="${key}"]`).value = preferences[key];
+    }
+    byId("analysis-methods").replaceChildren();
+    for (const [id, definition] of Object.entries(catalogue)) {
+      const label = node("label", null, "check"), input = node("input");
+      input.type = "checkbox"; input.value = id; input.checked = preferences.methods.includes(id);
+      label.append(input, document.createTextNode(definition.label)); byId("analysis-methods").append(label);
+    }
+  }
+  function changed() {
+    try {
+      const candidate = {field: byId("analysis-settings").querySelector('[name="field"]').value};
+      for (const key of ["window_size", "histogram_bins", "max_lag", "components", "seed"]) {
+        const raw = byId("analysis-settings").querySelector(`[name="${key}"]`).value;
+        if (raw === "") throw new Error(`Enter ${key.replaceAll("_", " ")}`);
+        candidate[key] = Number(raw);
+      }
+      candidate.methods = [...byId("analysis-methods").querySelectorAll("input:checked")].map((input) => input.value);
+      preferences = validateAnalysisPreferences(candidate, Object.keys(catalogue));
+      try { localStorage.setItem(storageKey, JSON.stringify(preferences)); }
+      catch (error) { showError("analysis-error", `Settings work but could not be saved: ${error.message}`); }
+      invalidate(); tick();
+    } catch (error) { showError("analysis-error", error.message); }
+  }
+  async function tick() {
+    if (busy || !status) return;
+    busy = true;
+    const startedGeneration = generation;
+    try {
+      if (!catalogue) {
+        catalogue = (await request("/api/analysis/methods")).methods;
+        try {
+          const stored = localStorage.getItem(storageKey);
+          if (stored !== null) preferences = validateAnalysisPreferences(JSON.parse(stored), Object.keys(catalogue));
+        } catch (error) { showError("analysis-error", `Could not restore analysis settings: ${error.message}; using defaults.`); }
+        loadControls();
+      }
+      const batchState = status.experiment;
+      const listKey = `${batchState.batch_id}:${batchState.active}:${batchState.outcome}`;
+      if (batchesKey !== listKey) {
+        const batches = (await request("/api/experiments")).batches;
+        const dataset = byId("analysis-dataset"), previous = dataset.value;
+        dataset.replaceChildren(new Option("Current / latest batch", ""));
+        for (const batch of batches) dataset.append(new Option(
+          `${batch.config.name} - ${batch.started_at.slice(0, 19)} - ${batch.outcome}`, batch.batch_id
+        ));
+        dataset.value = previous;
+        batchesKey = listKey;
+      }
+      const batchId = byId("analysis-dataset").value || batchState.batch_id;
+      if (!batchId) {
+        byId("analysis-state").textContent = "Start a batch or select saved data";
+        return;
+      }
+      const batch = await request(`/api/experiments/${encodeURIComponent(batchId)}`);
+      if (generation !== startedGeneration) return;
+      const scope = byId("analysis-scope"), priorScope = scope.value;
+      scope.replaceChildren(new Option("Latest / current run", "current"), new Option("All runs (pooled distribution)", "batch"));
+      batch.runs.filter((run) => run.session).forEach((run) => scope.append(new Option(`${run.run_id} - ${run.state}`, run.run_id)));
+      scope.value = [...scope.options].some((option) => option.value === priorScope) ? priorScope : "current";
+      byId("run-comparison").replaceChildren(table(
+        ["Run", "State", "Eligible n", "Excluded n", "Bias (m)", "Sample std. (m)", "RMSE (m)"],
+        batch.runs.map((run) => {
+          const summary = run.summaries?.[preferences.field] || {};
+          return [run.run_id, run.state, summary.count ?? 0, run.excluded_count ?? 0,
+            summary.bias_m, summary.std_m, summary.rmse_m];
+        })
+      ));
+      const selectedRuns = batch.runs.filter((run) => run.session &&
+        (scope.value === "batch" || scope.value === "current" || scope.value === run.run_id));
+      const closed = scope.value === "current"
+        ? selectedRuns.at(-1)?.state !== "recording"
+        : selectedRuns.every((run) => run.state !== "recording");
+      byId("analysis-full").disabled = !selectedRuns.length || !closed;
+      if (selection) {
+        const job = await request(`/api/analysis/jobs/${selection.jobId}`);
+        if (generation !== startedGeneration || !resultMatches(selection, job)) return;
+        if (["queued", "running"].includes(job.state)) {
+          byId("analysis-state").textContent = `Analysis ${job.state}`;
+          return;
+        }
+        if (job.state === "failed") throw new Error(job.error);
+        if (job.state === "superseded") { selection = null; dirty = true; }
+        else {
+          render(job.output);
+          byId("analysis-state").textContent = mode === "live" ? "Provisional live/window results" : "Full-data results saved";
+          selection = null; lastComputed = Date.now();
+        }
+      }
+      if (!dirty && (mode === "full" || batch.outcome !== "running" || Date.now() - lastComputed < 2000)) return;
+      const scopeValue = scope.value;
+      const recipe = {...preferences, batch_id: batchId, mode,
+        scope: ["current", "batch"].includes(scopeValue) ? scopeValue : "run",
+        run_id: ["current", "batch"].includes(scopeValue) ? null : scopeValue};
+      const job = await request("/api/analysis/jobs", {method: "POST", body: JSON.stringify(recipe)});
+      if (generation !== startedGeneration) return;
+      selection = {jobId: job.job_id, recipeKey: job.recipe_key}; dirty = false;
+      byId("analysis-state").textContent = "Analysis queued";
+    } catch (error) {
+      selection = null;
+      showError("analysis-error", error.message);
+      byId("analysis-state").textContent = "Analysis unavailable";
+    } finally {
+      busy = false;
+      if (selection) { clearTimeout(timer); timer = setTimeout(tick, 400); }
+    }
+  }
+  byId("analysis-settings").addEventListener("change", changed);
+  for (const id of ["analysis-dataset", "analysis-scope"]) {
+    byId(id).addEventListener("change", () => { mode = "live"; invalidate(); tick(); });
+  }
+  byId("analysis-full").addEventListener("click", () => { mode = "full"; invalidate(); tick(); });
+  window.addEventListener("resize", () => plots.forEach(({canvas, plot}) => drawAnalysisChart(canvas, plot)));
+  return {
+    update(next) {
+      status = next;
+      const scope = byId("analysis-scope").value;
+      const followsRuns = ["current", "batch"].includes(scope);
+      const selectedPhase = followsRuns
+        ? `${next.experiment.run_id}:${next.experiment.phase}`
+        : scope === next.experiment.run_id && next.experiment.phase === "recording" ? "open" : "closed";
+      const key = `${next.experiment.batch_id}:${selectedPhase}:${next.experiment.active}:${next.experiment.outcome}`;
+      if ((byId("analysis-dataset").value === "" || byId("analysis-dataset").value === next.experiment.batch_id) &&
+          key !== currentKey) {
+        currentKey = key;
+        if (followsRuns) mode = "live";
+        invalidate();
+      }
+      tick();
+    },
+  };
+}
+
+if (typeof module !== "undefined") module.exports = {
+  validateAnalysisPreferences, resultMatches, chartBounds,
+};

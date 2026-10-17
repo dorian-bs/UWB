@@ -49,7 +49,12 @@ def test_display_logic() -> None:
     node = shutil.which("node")
     assert node is not None, "Node.js is required to test the dashboard JavaScript"
     result = subprocess.run(
-        [node, "--test", str(Path(__file__).with_name("display.test.cjs"))],
+        [
+            node,
+            "--test",
+            str(Path(__file__).with_name("display.test.cjs")),
+            str(Path(__file__).with_name("experiment_analysis.test.cjs")),
+        ],
         capture_output=True,
         text=True,
         check=False,

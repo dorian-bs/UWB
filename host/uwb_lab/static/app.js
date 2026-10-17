@@ -300,6 +300,8 @@ function startDashboard() {
     if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || "Request failed"));
     return body;
   }
+  const experimentPanel = startExperimentPanel({request, showError, refreshStatus});
+  const analysisPanel = startAnalysisPanel({request, showError});
   async function refreshStatus() {
     try {
       const status = await request("/api/status");
@@ -317,12 +319,15 @@ function startDashboard() {
       byId("record-button").classList.toggle("stop", recording);
       showError("error-message", status.last_error || "");
       updateRadioStatus(status);
+      experimentPanel.update(status);
+      analysisPanel.update(status);
     } catch (error) {
       byId("status-dot").classList.remove("connected");
       byId("connection-label").textContent = "Host unavailable";
       showError("error-message", error.message);
       byId("radio-fields").disabled = true;
       byId("radio-refresh").disabled = true;
+      byId("experiment-start").disabled = true;
     }
   }
   function loadRadioFields(state) {
@@ -335,8 +340,8 @@ function startDashboard() {
   function updateRadioStatus(status) {
     const radio = status.radio;
     const available = radioAvailable(radio);
-    byId("radio-fields").disabled = !available || radioSubmitting;
-    byId("radio-refresh").disabled = !available || radioSubmitting;
+    byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active;
+    byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active;
     byId("observed-rate").textContent = `${format(status.observed_hz, 2)} successful samples/s`;
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
