@@ -17,6 +17,16 @@ def client(tmp_path, monkeypatch):
         yield connection
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["/", "/app.css", "/app.js", "/experiments.js", "/analysis.js"],
+)
+def test_dashboard_assets_are_not_cached_across_host_updates(client, path):
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-store"
+
+
 def test_batch_locks_prior_and_manual_recording(client):
     assert client.post("/api/prior", json={"distance_m": 2.0}).status_code == 200
     started = client.post(

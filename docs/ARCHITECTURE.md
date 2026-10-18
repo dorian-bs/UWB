@@ -122,8 +122,17 @@ Results compose metrics, tables and labelled series (`line`, `bars`, `stems`,
 `points`), rendered by dependency-free `analysis.js`; `experiments.js` supplies
 the batch controls. Existing signal plot preferences and pause-view behavior
 are separate. Numerical work does not run in the acquisition event loop.
-Display-only rounding uses 0.01 m for distance/error readouts and roughly three
-significant digits for other fractional analysis values; counts stay exact.
+Display-only rounding uses 0.001 m for distance/error readouts and three decimal
+places for other fractional readouts; counts stay exact integers. Tiny non-length
+values use scientific notation so spectral powers are not displayed as zero.
+Residual/spectrum cards use semantic metric tiles with separate units, a
+prominent signed bias and an explicit estimator badge. Shared counts and source
+appear once above the cards; provenance is under **Details**. Short metric
+labels expose full names on hover, without per-tile explanatory captions.
+Only multi-curve plots have legends. Spectrum methodology/scaling notes and
+secondary GMM fit diagnostics are expandable independently of the always-visible
+unavailable/stale-result notice; the expansion state persists across live
+results. These are browser-only presentation changes.
 Stored samples, fits and exported results retain numerical precision. While a
 selection refreshes, existing cards remain visible. A temporarily unavailable
 method retains its last successful chart with a notice identifying the previous

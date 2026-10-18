@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { experimentPayload, experimentLocked } = require("../uwb_lab/static/experiments.js");
-const { resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue } = require("../uwb_lab/static/analysis.js");
+const { resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue, analysisCardSummary, analysisSourceSummary, analysisLegendLabels } = require("../uwb_lab/static/analysis.js");
 
 test("experiment inputs preserve duration, integer repetitions and interval", () => {
   assert.deepEqual(experimentPayload({
@@ -40,13 +40,103 @@ test("analysis preferences are independent and validate persisted methods", () =
   assert.throws(() => validateAnalysisPreferences({...preferences, methods:["invented"]}));
 });
 
-test("analysis display rounds metres without changing counts or small spectral values", () => {
-  assert.equal(formatAnalysisValue(2.123456, "m"), "2.12");
-  assert.equal(formatAnalysisValue(-0.0001, "m"), "0.00");
+test("analysis display uses three decimal places without changing counts or hiding small spectral values", () => {
+  assert.equal(formatAnalysisValue(2.123456, "m"), "2.123");
+  assert.equal(formatAnalysisValue(-0.0001, "m"), "0.000");
+  assert.equal(formatAnalysisValue(-0.0016, "m"), "-0.002");
+  assert.equal(formatAnalysisValue(0, "m"), "0.000");
   assert.equal(formatAnalysisValue(3201, ""), "3201");
-  assert.equal(formatAnalysisValue(12.345678, ""), "12.3");
-  assert.equal(formatAnalysisValue(0.0000123456, "m^2/Hz"), "0.0000123");
+  assert.equal(formatAnalysisValue(64, "samples"), "64");
+  assert.equal(formatAnalysisValue(10, "Hz"), "10.000");
+  assert.equal(formatAnalysisValue(12.345678, ""), "12.346");
+  assert.equal(formatAnalysisValue(0.12, ""), "0.120");
+  assert.equal(formatAnalysisValue(0.0000123456, "m^2/Hz"), "1.235e-5");
   assert.equal(formatAnalysisValue(null, "m"), "--");
+  assert.equal(formatAnalysisValue(NaN, "m"), "--");
+  assert.equal(formatAnalysisValue(0.01234, "m", true), "+0.012");
+  assert.equal(formatAnalysisValue(-0.00001, "m", true), "0.000");
+});
+
+test("statistic values and units stay together while tiles reflow", () => {
+  const css = fs.readFileSync(require.resolve("../uwb_lab/static/app.css"), "utf8");
+  assert.match(css, /\.analysis-metrics \.metric-value \{[^}]*flex-wrap:\s*nowrap/);
+  assert.match(css, /\.analysis-metrics \.metric-value \{[^}]*white-space:\s*nowrap/);
+  assert.doesNotMatch(css, /\.metric-value strong \{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.analysis-metrics \{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap/);
+  assert.match(css, /\.analysis-metrics \.metric-tile \{[^}]*min-width:\s*max-content/);
+  assert.match(css, /\.metrics div \{[^}]*white-space:\s*nowrap/);
+});
+
+test("residual cards keep concise error labels without repeating shared counts or descriptions", () => {
+  const metrics = [
+    {key: "count", label: "Eligible samples", value: 3201, unit: ""},
+    {key: "bias_m", label: "Bias", value: 0.012345, unit: "m"},
+    {key: "std_m", label: "Sample standard deviation", value: 0.004567, unit: "m"},
+    {key: "rmse_m", label: "RMSE", value: 0.013456, unit: "m"},
+    {key: "p95_abs_m", label: "P95 absolute error", value: 0.024567, unit: "m"},
+  ];
+  const summary = analysisCardSummary("statistics", metrics);
+  assert.equal(summary.badges, undefined);
+  assert.equal(summary.description, undefined);
+  assert.deepEqual(summary.metrics.map((metric) => metric.key), ["bias_m", "std_m", "rmse_m", "p95_abs_m"]);
+  assert.equal(summary.metrics[0].value, 0.012345, "presentation must not round source values");
+  assert.equal(summary.metrics[1].label, "Std dev");
+  assert.equal(summary.metrics[1].title, "Sample standard deviation");
+});
+
+test("spectrum summary distinguishes Welch density from timestamp-aware Lomb-Scargle power", () => {
+  const shared = [
+    {key: "count", value: 294, unit: ""},
+    {key: "runs", value: 5, unit: ""},
+  ];
+  const welch = analysisCardSummary("psd", [...shared,
+    {key: "fs_hz", value: 10, unit: "Hz"}, {key: "segment", value: 59, unit: "samples"},
+    {key: "resolution_hz", value: 10 / 59, unit: "Hz"},
+  ]);
+  assert.equal(welch.badges, undefined);
+  assert.equal(welch.estimator, "Welch PSD");
+  assert.deepEqual(welch.metrics.map((metric) => metric.key), ["fs_hz", "segment", "resolution_hz"]);
+  const lomb = analysisCardSummary("psd", [...shared,
+    {key: "missing_samples", value: 3, unit: ""},
+    {key: "resolution_hz", value: 0.018857, unit: "Hz"},
+  ]);
+  assert.equal(lomb.estimator, "Lomb-Scargle");
+  assert.deepEqual(lomb.metrics.map((metric) => metric.key), ["missing_samples", "resolution_hz"]);
+  const unavailable = analysisCardSummary("psd", []);
+  assert.equal(unavailable.estimator, null);
+  assert.deepEqual(unavailable.metrics, []);
+});
+
+test("analysis context shows shared counts once and keeps provenance in Details", () => {
+  const output = {
+    included_count: 294, mode: "cumulative", excluded: {invalid: 2, missing_prior: 0},
+    provenance: {runs: [{run_id: "one"}, {run_id: "two"}], batch_outcome: "completed",
+      batch_id: "batch-a", source_sha256: "abcdef123456", analysis_version: "noise-3"},
+  };
+  const source = analysisSourceSummary(output, "corrected_m");
+  assert.equal(source.text, "294 samples / 2 runs / Corrected residuals / 2 excluded");
+  assert.ok(source.text.length < 85);
+  assert.match(source.details, /Batch completed/);
+  assert.match(source.details, /abcdef123456/);
+  assert.match(source.details, /noise-3/);
+  assert.match(source.details, /recorded expected distance/);
+});
+
+test("legends retain short multi-curve names but omit redundant single-curve captions", () => {
+  assert.deepEqual(analysisLegendLabels([{label: "Pooled Welch PSD"}]), []);
+  assert.deepEqual(analysisLegendLabels([{label: "Empirical density"}, {label: "Gaussian baseline"}]),
+    ["Samples", "Gaussian"]);
+  assert.deepEqual(analysisLegendLabels([{label: "Mixture density"}, {label: "Component 1"}, {label: "Component 2"}]),
+    ["Mixture", "C1", "C2"]);
+});
+
+test("redundant GMM fit diagnostics remain available in Details", () => {
+  const summary = analysisCardSummary("gmm", [
+    {key: "aic", value: 10}, {key: "bic", value: 20},
+    {key: "log_likelihood", value: 0.5}, {key: "converged", value: 1},
+  ]);
+  assert.deepEqual(summary.metrics.map((metric) => metric.key), ["aic", "bic"]);
+  assert.deepEqual(summary.detailMetrics.map((metric) => metric.key), ["log_likelihood", "converged"]);
 });
 
 test("old preferences migrate away from autocorrelation without losing other selections", () => {
@@ -132,8 +222,8 @@ test("old preferences migrate away from autocorrelation without losing other sel
     const [nextId, nextCallback] = timers.entries().next().value;
     timers.delete(nextId); nextCallback();
     await flush();
-    assert.match(getElement("analysis-source").textContent, /10 eligible samples/);
-    assert.match(getElement("analysis-source").textContent, /Batch completed/);
+    assert.match(getElement("analysis-source").textContent, /10 samples/);
+    assert.match(getElement("analysis-provenance").textContent, /Batch completed/);
   });
 
 test("pooled cumulative analysis keeps existing cards visible throughout run and dataset changes", async () => {
@@ -154,9 +244,13 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   getElement("analysis-scope").value = "batch";
   const timers = new Map(), recipes = [], errors = [];
   let timerId = 0, resultStatus = "ok";
+  const legacyPreferences = {
+    field: "raw_m", methods: ["statistics", "histogram", "acf", "psd", "gmm"],
+    window_size: 2000, histogram_bins: 17, max_lag: 30, components: 3, seed: 4,
+  };
   const environment = {
     document: {getElementById: getElement, createElement: () => new Element(), createTextNode: (text) => text},
-    window: {addEventListener() {}}, localStorage: {getItem: () => null},
+    window: {addEventListener() {}}, localStorage: {getItem: () => JSON.stringify(legacyPreferences)},
     Option: class extends Element { constructor(text, value) { super(); this.textContent = text; this.value = value; } },
     setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: (id) => timers.delete(id),
@@ -165,7 +259,10 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   const panel = environment.startAnalysisPanel({
     showError: (_, message) => { if (message) errors.push(message); },
     async request(path, options) {
-      if (path === "/api/analysis/methods") return {methods: {statistics: {label: "Statistics"}}};
+      if (path === "/api/analysis/methods") return {methods: {
+        statistics: {label: "Statistics"}, histogram: {label: "Histogram"},
+        psd: {label: "Spectrum"}, gmm: {label: "Gaussian mixture"},
+      }};
       if (path === "/api/experiments") return {batches: []};
       if (path === "/api/experiments/batch-a") return {
         outcome: "running", runs: [{run_id: "run-0001", state: "completed", session: "one"},
@@ -181,7 +278,12 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
           provenance: {batch_outcome: "running", source_sha256: "abc123", analysis_version: "noise-2"},
           results: [{method: "statistics", label: "Residual statistics", run_id: null,
             result: {status: resultStatus, reason: resultStatus === "ok" ? null : "Not enough new samples",
-              metrics: [], plots: [], tables: [], warnings: []}}]},
+              metrics: [], plots: [], tables: [], warnings: []}},
+            {method: "gmm", label: "Gaussian mixture", run_id: null, result: {
+              status: "ok", metrics: [], plots: [], tables: [],
+              warnings: ["Exploratory components are not LOS/NLOS labels; covariance regularization = 1e-10 m^2",
+                "Numerical fit warning"],
+            }}]},
       };
     },
   });
@@ -194,12 +296,25 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   assert.equal(recipes[0].scope, "batch");
   assert.equal(recipes[0].mode, "cumulative");
   assert.ok(!("window_size" in recipes[0]));
+  assert.ok(!("max_lag" in recipes[0]));
+  assert.deepEqual(recipes[0].methods, ["statistics", "histogram", "psd", "gmm"]);
+  assert.equal(recipes[0].field, "raw_m");
+  assert.equal(recipes[0].histogram_bins, 17);
+  assert.equal(recipes[0].components, 3);
+  assert.equal(recipes[0].seed, 4);
   const [id, callback] = timers.entries().next().value;
   timers.delete(id); callback();
   await flush();
   const card = getElement("analysis-cards").children[0];
   assert.ok(card);
   assert.equal(card.dataset.method, "statistics");
+  const mixture = getElement("analysis-cards").children[1];
+  assert.ok(mixture.children.some((child) => child.textContent === "Numerical fit warning"),
+    "numerical warnings must stay visible, not be folded into methodology notes");
+  const details = mixture.children.find((child) => child.className === "analysis-method-details");
+  assert.ok(details);
+  assert.equal(details.open, false);
+  assert.ok(details.children.some((child) => child.textContent.startsWith("Exploratory components")));
   resultStatus = "unavailable";
   panel.update(status("run-0002"));
   assert.equal(getElement("analysis-cards").children[0], card);

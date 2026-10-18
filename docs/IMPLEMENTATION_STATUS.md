@@ -33,10 +33,20 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   One background worker coalesces pending requests.
   Closed-file recomputation saves source hashes, recipe, prior references and
   numerical versions separately from raw data (analysis version `noise-3`).
-  Distance/error readouts use display-only 0.01 m rounding; other fractional
-  analysis values use roughly three significant digits and counts stay exact.
+  Distance/error readouts use display-only 0.001 m rounding; fractional readouts
+  use three decimal places, tiny spectral values use scientific notation and
+  counts stay exact integers. Residual statistics have a prominent signed-bias
+  tile and separate error/spread tiles. Statistic values and their smaller units
+  stay on one baseline; analysis tiles and live readouts reflow with available
+  space instead of splitting numbers or wrapping units. Spectrum cards show the estimator,
+  a compact metric strip and expandable details. Shared counts appear once
+  above the cards; descriptions, provenance, method caveats and secondary GMM
+  diagnostics are in Details or hover titles instead of repeating on plots.
   Cards remain visible during transitions/refreshes, with explicit stale-source
   notices if a method must retain its last successful result.
+  Old saved preferences discard retired autocorrelation settings. Dashboard
+  HTML/styles/scripts use `Cache-Control: no-store`; already-open tabs still
+  need a hard refresh after a host update to replace their loaded JavaScript.
 - `TxDebug`/`RxDebug` presets select STM32 board roles without source edits; initiator emits
   compact version-1 NDJSON after successful DS-TWR exchanges, preserving readable logs.
 - ESP32-S3 bridges UART/TCP in both directions; Wi-Fi/port use `menuconfig`.
@@ -85,7 +95,7 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
 
 ### Pooled-statistics verification (2026-10-18)
 
-- `make verify`: Ruff check/format and all 69 pytest tests pass, including Node
+- `make verify`: Ruff check/format and all 74 pytest tests pass, including Node
   UI tests, native firmware checks and HTTP smoke tests.
 - Numerical regressions cover 3200 individual samples from unequal-length runs,
   Gaussian/GMM sample weighting, pooled sample-level spectra, reset rejection,
@@ -97,8 +107,21 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   samples yield a finite current spectrum rather than a stale-result notice.
 - Browser checks on isolated demo data: two 40-sample runs produce one 80-sample
   analysis and spectrum; cards never become empty during the transition.
-  Centimetre readout rounding, removal of ACF, raw/corrected selection, saved
+  Removal of ACF, raw/corrected selection, saved
   full-data recomputation and 390-pixel layout without overflow were checked.
+- Presentation checks cover three-decimal readouts, signed bias/error tiles,
+  estimator badges and shared counts for both Welch and Lomb-Scargle, notes expansion
+  surviving result refreshes, unwrapped numeric tiles at desktop width and
+  the two-column residual layout at 390 pixels without horizontal overflow.
+- Compact graph checks verify short metric labels/legends, no redundant
+  single-curve captions, provenance and secondary diagnostics under Details,
+  and numerical warnings remaining visible outside methodology notes.
+- Inline-unit browser checks cover all 14 analysis/live value-unit pairs at nine
+  widths from 320 to 1440 pixels, including wider signed test values: no split
+  numbers, wrapped units, tile overflow or page overflow.
+- Cache regressions cover all five dashboard asset routes. Batch-start analysis
+  restores old saved settings without submitting `acf`, `max_lag` or the retired
+  analysis-window preference, while preserving supported selections and parameters.
 - The pre-existing Starlette/httpx deprecation warning remains. No hardware or
   RF precision/accuracy claim is implied by these host-only checks.
 

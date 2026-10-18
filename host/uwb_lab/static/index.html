@@ -55,7 +55,7 @@
         </div>
         <section id="plot-controls" class="plot-controls" aria-label="Plot 1 settings">
         <fieldset id="series-controls" class="series-controls">
-          <legend>Visible series (m): distance on left; residual, bias and spread on right</legend>
+          <legend>Distance: left / Error: right (m)</legend>
           <label class="raw"><input type="checkbox" value="raw_m">Raw</label>
           <label class="corrected"><input type="checkbox" value="corrected_m" checked>Corrected</label>
           <label class="expected"><input type="checkbox" value="expected_m" checked>Expected</label>
@@ -87,11 +87,10 @@
       <div id="secondary-block" class="plot-block" hidden>
         <div class="plot-heading">
           <h2>Plot 2</h2>
-          <span class="plot-note">Shared sample window; independent traces and axes</span>
         </div>
         <section id="second-plot-controls" class="plot-controls" aria-label="Plot 2 settings">
           <fieldset id="second-series-controls" class="series-controls">
-            <legend>Visible series (m): distance on left; residual, bias and spread on right</legend>
+            <legend>Distance: left / Error: right (m)</legend>
             <label class="raw"><input type="checkbox" value="raw_m">Raw</label>
             <label class="corrected"><input type="checkbox" value="corrected_m">Corrected</label>
             <label class="expected"><input type="checkbox" value="expected_m">Expected</label>
@@ -124,11 +123,16 @@
           <label>Dataset<select id="analysis-dataset"><option value="">Current batch</option></select></label>
           <label>Scope<select id="analysis-scope"><option value="batch">All runs (all samples)</option><option value="current">Latest / current run</option></select></label>
         </div>
-        <p id="analysis-source" class="plot-note">Residuals are relative to your prior, not necessarily intrinsic sensor noise. GMM components are exploratory, not LOS/NLOS labels.</p>
+        <div class="analysis-context">
+          <p id="analysis-source" class="plot-note">Select a dataset.</p>
+          <details id="analysis-details" hidden>
+            <summary>Details</summary>
+            <p id="analysis-provenance" class="plot-note"></p>
+          </details>
+        </div>
         <div id="analysis-cards" class="analysis-grid"></div>
         <h2 class="comparison-title">Run comparison</h2>
         <div id="run-comparison" class="table-scroll"></div>
-        <p class="plot-note">Repeated automatic recordings are not necessarily independent experiments. Signal view pause does not pause the batch or analysis.</p>
       </section>
     </section>
 
@@ -163,8 +167,6 @@
             </div>
           </details>
           <button id="analysis-full" type="button">Recompute full closed dataset</button>
-          <p class="plot-note">Analysis uses every eligible sample from the selected runs, independently of the signal display window. Distances/errors are rounded to 0.01 m for display only, not as a claim of accuracy. Spectra respect run boundaries: Welch PSD for regular timing, timestamp-aware Lomb-Scargle power when samples are missing or irregular.</p>
-          <p class="plot-note">The GMM fits individual residuals (selected range minus recorded expected distance), not run means or the histogram bars. Components describe weights, mean errors and spreads, not identified physical causes.</p>
           <p id="analysis-error" class="error" role="alert" hidden></p>
         </div>
       </section>

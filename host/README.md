@@ -115,6 +115,12 @@ Consecutive automatic recordings do not imply independent physical experiments.
 The methods are residual statistics, density histogram with Gaussian baseline,
 pooled spectrum (Welch PSD or Lomb-Scargle power), and a seeded 1-6-component GMM.
 Autocorrelation is removed for now.
+If an already-open dashboard reports rejected `acf` or `max_lag` inputs after an
+update, hard-refresh it (`Cmd+Shift+R` on macOS, `Ctrl+Shift+R` elsewhere).
+Old tabs keep executing their loaded JavaScript until refreshed; reloading does
+not stop a batch. Existing saved analysis preferences migrate away from these
+retired settings. Dashboard HTML, styles and scripts are served with
+`Cache-Control: no-store` to prevent stale assets on subsequent page loads.
 Choose either raw or corrected range minus the **recorded** expected distance.
 These residuals include prior/geometry errors; mixture components are not
 automatically LOS/NLOS classes. No outlier trimming or correction is applied.
@@ -165,10 +171,25 @@ data or no common frequency band produces an explicit reason. Frequency comes
 from device timing, not the requested rate. At roughly 1 Hz, allow at least
 32 seconds and enough successful measurements per run for a spectrum.
 
-Distances/errors are displayed to 0.01 m; other fractional analysis values use
-about three significant digits and sample counts remain exact. This is display
-rounding, not a claim of centimetre accuracy: recorded data and calculations
-are not rounded. Existing cards remain visible while the selection updates,
+Distances/errors are displayed to 0.001 m; fractional readouts use three decimal
+places and sample counts remain exact integers. Tiny non-length values such as
+spectral power use scientific notation instead of being rounded to zero.
+This is display rounding, not a claim of millimetre accuracy: recorded data and
+calculations are not rounded.
+
+Residual statistics use a prominent signed-bias tile with separate standard
+deviation, RMSE and P95 tiles. Short labels retain their full names in hover
+titles. Values and their smaller units stay together on one baseline in both
+analysis tiles and live readouts; tiles reflow rather than splitting numbers
+or wrapping units underneath. Sample/run counts appear once above the cards, alongside the residual
+source and nonzero exclusions. **Details** there contains provenance and prior
+semantics. Spectrum cards identify the estimator and relevant metrics without
+repeating the shared counts or a single-curve legend.
+Card **Details** holds method/scaling notes and secondary GMM fit diagnostics;
+the expansion state survives live refreshes. Real failures remain visible.
+Multi-curve plots retain short legends, and the signal plot footer shows only
+the displayed/requested sample count (buffer/rolling-window details on hover).
+Existing cards remain visible while the selection updates,
 including run transitions. If a method is temporarily unavailable (for example
 the new run is too short for PSD), its last successful result remains with an
 explicit previous-source notice until a replacement is ready.

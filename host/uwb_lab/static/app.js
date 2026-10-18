@@ -291,7 +291,8 @@ function startDashboard() {
     byId("view-state").classList.toggle("paused", view.paused());
     byId("pause-view").textContent = view.paused() ? "Resume view" : "Pause view";
     byId("pause-view").setAttribute("aria-pressed", String(view.paused()));
-    byId("window-label").textContent = `${samples.length} shown / ${preferences.count} requested; ${view.buffered()} live buffered (max 2000). Rolling statistics: host's last 20 residuals, independent of display window.${view.paused() ? " Readouts frozen." : ""}`;
+    byId("window-label").textContent = `${samples.length} / ${preferences.count} samples`;
+    byId("window-label").title = `${view.buffered()} / 2000 buffered. Rolling statistics use the host's last 20 residuals.`;
   }
 
   async function request(path, options = {}) {
@@ -342,7 +343,7 @@ function startDashboard() {
     const available = radioAvailable(radio);
     byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active;
     byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active;
-    byId("observed-rate").textContent = `${format(status.observed_hz)} successful samples/s`;
+    byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} successful samples/s`;
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
@@ -353,7 +354,7 @@ function startDashboard() {
       const lost = board.telemetry_dropped || 0;
       if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}; USB lines discarded: ${lost}`;
       const power = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
-      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${state.data_rate / 1000} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
+      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
     });
     byId("radio-state").textContent = descriptions.join("\n");
     if (radio.last_error) showError("radio-error", radio.last_error);

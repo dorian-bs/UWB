@@ -333,27 +333,39 @@ app = FastAPI(title="UWB Lab", lifespan=lifespan)
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(PACKAGE_DIR / "static" / "index.html")
+    return FileResponse(PACKAGE_DIR / "static" / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/app.css")
 async def stylesheet() -> FileResponse:
-    return FileResponse(PACKAGE_DIR / "static" / "app.css", media_type="text/css")
+    return FileResponse(
+        PACKAGE_DIR / "static" / "app.css", media_type="text/css", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/app.js")
 async def javascript() -> FileResponse:
-    return FileResponse(PACKAGE_DIR / "static" / "app.js", media_type="text/javascript")
+    return FileResponse(
+        PACKAGE_DIR / "static" / "app.js", media_type="text/javascript", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/experiments.js", response_class=FileResponse)
 async def experiment_javascript() -> FileResponse:
-    return FileResponse(PACKAGE_DIR / "static" / "experiments.js", media_type="text/javascript")
+    return FileResponse(
+        PACKAGE_DIR / "static" / "experiments.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/analysis.js")
 async def analysis_javascript() -> FileResponse:
-    return FileResponse(PACKAGE_DIR / "static" / "analysis.js", media_type="text/javascript")
+    return FileResponse(
+        PACKAGE_DIR / "static" / "analysis.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/status")

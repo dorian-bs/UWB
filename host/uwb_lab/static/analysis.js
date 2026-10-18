@@ -21,14 +21,70 @@ function validateAnalysisPreferences(value, methodIds = ANALYSIS_DEFAULTS.method
   return result;
 }
 
-function formatAnalysisValue(value, unit = "") {
+function formatAnalysisValue(value, unit = "", signed = false) {
   if (value == null || (typeof value === "number" && !Number.isFinite(value))) return "--";
   if (typeof value !== "number") return String(value);
-  if (unit === "m") {
-    const rounded = Number(value.toFixed(2));
-    return (Object.is(rounded, -0) ? 0 : rounded).toFixed(2);
+  let formatted;
+  if (unit !== "m" && value !== 0 && Math.abs(value) < 0.001) {
+    formatted = value.toExponential(3);
+  } else if (Number.isInteger(value) && ["", "samples"].includes(unit)) {
+    formatted = String(value);
+  } else {
+    const rounded = Number(value.toFixed(3));
+    formatted = (Object.is(rounded, -0) ? 0 : rounded).toFixed(3);
   }
-  return Number.isInteger(value) ? String(value) : Number(value.toPrecision(3)).toString();
+  return signed && Number(formatted) > 0 ? `+${formatted}` : formatted;
+}
+
+function analysisCardSummary(method, metrics) {
+  const headerKeys = method === "statistics" ? ["count"] : method === "psd" ? ["count", "runs"] : [];
+  const detailKeys = method === "gmm" ? ["log_likelihood", "converged"] : [];
+  let estimator = null;
+  if (method === "psd") {
+    if (metrics.some((metric) => metric.key === "missing_samples")) {
+      estimator = "Lomb-Scargle";
+    } else if (metrics.some((metric) => metric.key === "fs_hz")) {
+      estimator = "Welch PSD";
+    }
+  }
+  const labels = {
+    std_m: "Std dev", p95_abs_m: "P95 error", mean_m: "Mean", sigma_m: "Sigma",
+    fs_hz: "Sample rate", segment: "Segment", missing_samples: "Missing",
+    resolution_hz: estimator === "Lomb-Scargle" ? "Grid step" : "Bin width",
+  };
+  return {
+    estimator,
+    metrics: metrics.filter((metric) => !headerKeys.includes(metric.key) && !detailKeys.includes(metric.key))
+      .map((metric) => {
+        const scope = metric.label?.match(/ \((?:full selection|window)\)$/)?.[0] || "";
+        return {...metric, title: metric.label, label: labels[metric.key] ? labels[metric.key] + scope : metric.label};
+      }),
+    detailMetrics: metrics.filter((metric) => detailKeys.includes(metric.key)),
+  };
+}
+
+function analysisSourceSummary(output, field) {
+  const provenance = output.provenance, runs = provenance.runs || [];
+  const excluded = Object.values(output.excluded).reduce((sum, count) => sum + count, 0);
+  const parts = [`${output.included_count} samples`];
+  if (runs.length) parts.push(`${runs.length} run${runs.length === 1 ? "" : "s"}`);
+  parts.push(`${field === "raw_m" ? "Raw" : "Corrected"} residuals`);
+  if (excluded) parts.push(`${excluded} excluded`);
+  if (!["completed", "running"].includes(provenance.batch_outcome)) parts.push(provenance.batch_outcome);
+  return {
+    text: parts.join(" / "),
+    details: `Batch ${provenance.batch_outcome} (${provenance.batch_id}). Runs: ${runs.map((run) => run.run_id).join(", ")}. ` +
+      `Field: ${field}. Exclusions: ${JSON.stringify(output.excluded)}. ` +
+      `Source ${provenance.source_sha256}; ${provenance.analysis_version}. ` +
+      "Residual = range - recorded expected distance; prior errors are included. " +
+      "All eligible samples are pooled by sample count. Repeated runs need not be independent.",
+  };
+}
+
+function analysisLegendLabels(series) {
+  if (series.length < 2) return [];
+  const labels = {"Empirical density": "Samples", "Gaussian baseline": "Gaussian", "Mixture density": "Mixture"};
+  return series.map((curve) => labels[curve.label] || curve.label.replace(/^Component (\d+)$/, "C$1"));
 }
 
 function resultMatches(selection, job) {
@@ -65,15 +121,16 @@ function drawAnalysisChart(canvas, plot) {
   const area = {left: 66, right: width - 12, top: 12, bottom: 178};
   const x = (value) => area.left + (value - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
   const y = (value) => area.bottom - (value - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
-  const label = (value) => Number(value.toPrecision(3)).toString();
+  const xUnit = plot.x_label.match(/\(([^)]+)\)$/)?.[1] || "";
+  const yUnit = plot.y_label.match(/\(([^)]+)\)$/)?.[1] || "";
   context.fillStyle = "#fff"; context.fillRect(0, 0, width, height);
   context.font = "10px system-ui"; context.lineWidth = 1;
   for (let tick = 0; tick <= 4; tick++) {
     const value = bounds.y.min + tick * (bounds.y.max - bounds.y.min) / 4;
     context.strokeStyle = "#e5ebe7"; context.beginPath(); context.moveTo(area.left, y(value)); context.lineTo(area.right, y(value)); context.stroke();
-    context.fillStyle = "#52615e"; context.textAlign = "right"; context.fillText(label(value), area.left - 5, y(value) + 3);
+    context.fillStyle = "#52615e"; context.textAlign = "right"; context.fillText(formatAnalysisValue(value, yUnit), area.left - 5, y(value) + 3);
     const xv = bounds.x.min + tick * (bounds.x.max - bounds.x.min) / 4;
-    context.textAlign = "center"; context.fillText(label(xv), x(xv), area.bottom + 15);
+    context.textAlign = "center"; context.fillText(formatAnalysisValue(xv, xUnit), x(xv), area.bottom + 15);
   }
   const colors = ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#d47729"];
   plot.series.forEach((curve, index) => {
@@ -104,6 +161,7 @@ function startAnalysisPanel({request, showError}) {
   let selection = null, generation = 0, busy = false, dirty = true, lastComputed = 0;
   let mode = "cumulative", plots = [], timer = null, hasResults = false;
   let cards = new Map();
+  const methodDetailsOpen = new Map();
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
     if (text != null) element.textContent = text;
@@ -128,21 +186,21 @@ function startAnalysisPanel({request, showError}) {
   function invalidate() {
     generation++; selection = null; dirty = true; lastComputed = 0;
     byId("analysis-state").textContent = hasResults
-      ? "Updating analysis; showing previous results" : "Selection changed; awaiting computation";
+      ? "Updating..." : "Awaiting analysis";
   }
   function render(output) {
     const nextPlots = [], nextCards = [], nextEntries = new Map();
-    byId("analysis-source").textContent =
-      `${output.mode === "full" ? "Full closed data" : "All samples so far"}: ${output.included_count} eligible samples; exclusions ${JSON.stringify(output.excluded)}. ` +
-      `${preferences.field} - recorded expected distance. Batch ${output.provenance.batch_outcome}. ` +
-      `Source ${output.provenance.source_sha256.slice(0, 12)}; ${output.provenance.analysis_version}. Pooled distributions are sample-weighted.`;
+    const source = analysisSourceSummary(output, preferences.field);
+    byId("analysis-source").textContent = source.text;
+    byId("analysis-provenance").textContent = source.details;
+    byId("analysis-details").hidden = false;
     const container = byId("analysis-cards");
     for (const item of output.results) {
       const result = item.result, previous = cards.get(item.method);
       if (result.status !== "ok" && previous?.successful) {
         previous.notice.hidden = false;
-        previous.notice.textContent =
-          `${result.status}: ${result.reason}. Showing previous result (${previous.source}); not the updated selection.`;
+        previous.notice.textContent = `${result.reason}. Showing previous result.`;
+        previous.notice.title = previous.source;
         nextCards.push(previous.card);
         nextPlots.push(...previous.plots);
         nextEntries.set(item.method, previous);
@@ -150,26 +208,57 @@ function startAnalysisPanel({request, showError}) {
       }
       const card = node("article", null, "analysis-card");
       card.dataset.method = item.method;
-      card.append(node("h3", `${item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
+      const summary = analysisCardSummary(item.method, result.metrics);
+      const header = node("header", null, "analysis-card-header");
+      const titles = {statistics: "Residuals", histogram: "Histogram", psd: "Spectrum", gmm: "Gaussian mixture"};
+      header.append(node("h3", `${titles[item.method] || item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
+      if (summary.estimator) header.append(node("span", summary.estimator, "analysis-badge analysis-badge--method"));
+      card.append(header);
       const notice = node("p", result.status === "ok" ? "" : `${result.status}: ${result.reason}`, "analysis-notice");
       notice.hidden = result.status === "ok";
       card.append(notice);
       const cardPlots = [];
-      const metrics = node("div", null, "analysis-metrics");
-      for (const metric of result.metrics) {
-        const cell = node("div");
-        cell.append(node("span", metric.label), node("strong", `${formatAnalysisValue(metric.value, metric.unit)} ${metric.unit}`));
+      const metrics = node("dl", null, "analysis-metrics");
+      for (const metric of summary.metrics) {
+        const primary = item.method === "statistics" && metric.key === "bias_m";
+        const cell = node("div", null, `metric-tile${primary ? " metric-tile--primary" : ""}`);
+        cell.dataset.key = metric.key;
+        const value = node("dd", null, "metric-value");
+        value.append(node("strong", formatAnalysisValue(metric.value, metric.unit, primary)));
+        if (metric.unit) value.append(node("span", metric.unit, "metric-unit"));
+        const label = node("dt", metric.label);
+        label.title = metric.title;
+        cell.append(label, value);
         metrics.append(cell);
       }
-      if (result.metrics.length) card.append(metrics);
+      if (summary.metrics.length) card.append(metrics);
       for (const value of result.tables) card.append(table(value.columns, value.rows));
       for (const plot of result.plots) {
         const canvas = node("canvas");
         canvas.setAttribute("aria-label", `${item.label}: ${plot.x_label}; ${plot.y_label}`);
-        card.append(canvas, node("p", plot.series.map((curve) => curve.label).join(" / "), "plot-note"));
+        card.append(canvas);
+        const labels = analysisLegendLabels(plot.series);
+        if (labels.length) {
+          const legend = node("p", labels.join(" / "), "plot-note");
+          legend.title = plot.series.map((curve) => curve.label).join(" / ");
+          card.append(legend);
+        }
         cardPlots.push({canvas, plot});
       }
-      result.warnings.forEach((warning) => card.append(node("p", warning, "plot-note")));
+      const methodNotes = result.warnings.filter((warning) =>
+        item.method === "psd" || (item.method === "gmm" && warning.startsWith("Exploratory components are not LOS/NLOS labels;")));
+      result.warnings.filter((warning) => !methodNotes.includes(warning))
+        .forEach((warning) => card.append(node("p", warning, "plot-note")));
+      if (methodNotes.length || summary.detailMetrics.length) {
+        const details = node("details", null, "analysis-method-details");
+        details.open = methodDetailsOpen.get(item.method) === true;
+        details.addEventListener("toggle", () => { methodDetailsOpen.set(item.method, details.open); });
+        details.append(node("summary", "Details"));
+        methodNotes.forEach((note) => details.append(node("p", note, "plot-note")));
+        summary.detailMetrics.forEach((metric) => details.append(node("p",
+          `${metric.label}: ${formatAnalysisValue(metric.value, metric.unit)}`, "plot-note")));
+        card.append(details);
+      }
       nextCards.push(card);
       nextPlots.push(...cardPlots);
       nextEntries.set(item.method, {
@@ -266,7 +355,7 @@ function startAnalysisPanel({request, showError}) {
         if (generation !== startedGeneration || !resultMatches(selection, job)) return;
         if (["queued", "running"].includes(job.state)) {
           byId("analysis-state").textContent = hasResults
-            ? `Updating analysis (${job.state}); showing previous results` : `Analysis ${job.state}`;
+            ? "Updating..." : `Analysis ${job.state}`;
           return;
         }
         if (job.state === "failed") throw new Error(job.error);
@@ -274,7 +363,7 @@ function startAnalysisPanel({request, showError}) {
         else {
           render(job.output);
           showError("analysis-error", "");
-          byId("analysis-state").textContent = mode === "full" ? "Full-data results saved" : "Cumulative sample results";
+          byId("analysis-state").textContent = mode === "full" ? "Saved results" : "Updated";
           selection = null; lastComputed = Date.now();
         }
       }
@@ -287,12 +376,12 @@ function startAnalysisPanel({request, showError}) {
       if (generation !== startedGeneration) return;
       selection = {jobId: job.job_id, recipeKey: job.recipe_key}; dirty = false;
       byId("analysis-state").textContent = hasResults
-        ? "Updating analysis (queued); showing previous results" : "Analysis queued";
+        ? "Updating..." : "Analysis queued";
     } catch (error) {
       selection = null;
       showError("analysis-error", error.message);
       byId("analysis-state").textContent = hasResults
-        ? "Analysis unavailable; showing previous results" : "Analysis unavailable";
+        ? "Update failed - previous results" : "Analysis unavailable";
     } finally {
       busy = false;
       if (selection) { clearTimeout(timer); timer = setTimeout(tick, 400); }
@@ -325,5 +414,6 @@ function startAnalysisPanel({request, showError}) {
 }
 
 if (typeof module !== "undefined") module.exports = {
-  validateAnalysisPreferences, resultMatches, chartBounds, formatAnalysisValue,
+  validateAnalysisPreferences, resultMatches, chartBounds, formatAnalysisValue, analysisCardSummary,
+  analysisSourceSummary, analysisLegendLabels,
 };

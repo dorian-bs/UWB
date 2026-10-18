@@ -60,7 +60,7 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
         : "No batch started";
       if (locked) {
         byId("experiment-timing").textContent =
-          `${state.elapsed_s.toFixed(1)} s elapsed; ${state.remaining_s.toFixed(1)} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host.`;
+          `${formatAnalysisValue(state.elapsed_s, "s")} s elapsed; ${formatAnalysisValue(state.remaining_s, "s")} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host.`;
       } else if (state.batch_id) {
         byId("experiment-timing").textContent = `Batch ${state.batch_id}: ${state.outcome}. Saved recordings remain available below.`;
       }
