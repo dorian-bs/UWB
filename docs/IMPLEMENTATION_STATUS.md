@@ -2,6 +2,7 @@
 
 Baseline implementation snapshot: **2026-09-28**. Dual-USB radio controls: **2026-10-13**.
 Repeated experiments and noise analysis: **2026-10-17**.
+Pooled sample analysis and statistics display: **2026-10-18**.
 This is a small vertical slice across phases 0-3, not full completion of those phases.
 Contracts and code ownership live in [ARCHITECTURE.md](ARCHITECTURE.md);
 scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md).
@@ -15,15 +16,27 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   does not stop scheduling; stop/disconnect/shutdown preserves incomplete
   outcomes, and empty runs fail explicitly. Manifests use atomic replacement;
   saved unfinished batches reopen as interrupted without automatic resumption.
-- Selectable noise-analysis cards provide summary statistics, histogram/Gaussian
-  baseline, sample-lag ACF, timing-qualified Welch PSD, and seeded configurable
-  GMM fitting with parameters/convergence/AIC/BIC. Raw/corrected residuals,
-  current/saved runs and pooled distributions share one Python implementation.
-  Live windows are bounded independently of signal plots; full-selection moments
-  and window quantiles/fits are explicitly labelled. One background worker
-  coalesces pending analysis requests. Closed-file recomputation saves source
-  hashes, recipe, prior references and numerical versions separately from raw data.
-  ACF/PSD never concatenate runs; irregular/gapped spectra show an explicit reason.
+- Selectable noise-analysis cards provide the five core residual statistics
+  (count, bias, sample standard deviation, RMSE, P95 absolute error),
+  histogram/Gaussian baseline, pooled Welch PSD or timestamp-aware Lomb-Scargle
+  power, and seeded
+  configurable GMM fitting with parameters/convergence/AIC/BIC. Autocorrelation
+  is removed for now. Raw/corrected residuals and current/saved runs share one
+  Python implementation. All selected-batch runs are analysed by default,
+  using every eligible individual sample recorded so far, not run averages or
+  a 2000-sample analysis window. Each job freezes its input file lengths.
+  Spectra combine sample-weighted within-run results on a common grid: Welch
+  densities for regular timing, Lomb-Scargle power over actual timestamps if
+  any samples are missing/irregular or cadences differ. No gaps are filled or
+  compressed, and no runs are silently omitted. Resets, duplicate/non-increasing
+  times and insufficient samples still produce explicit reasons.
+  One background worker coalesces pending requests.
+  Closed-file recomputation saves source hashes, recipe, prior references and
+  numerical versions separately from raw data (analysis version `noise-3`).
+  Distance/error readouts use display-only 0.01 m rounding; other fractional
+  analysis values use roughly three significant digits and counts stay exact.
+  Cards remain visible during transitions/refreshes, with explicit stale-source
+  notices if a method must retain its last successful result.
 - `TxDebug`/`RxDebug` presets select STM32 board roles without source edits; initiator emits
   compact version-1 NDJSON after successful DS-TWR exchanges, preserving readable logs.
 - ESP32-S3 bridges UART/TCP in both directions; Wi-Fi/port use `menuconfig`.
@@ -69,6 +82,25 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
 - Repeatable/idempotent macOS setup, environment checking, build/run/flash wrappers and top-level `make`
   commands support the project. Dependencies are declared in `host/pyproject.toml`; `.venv` holds the host
   environment. Setup includes ESP-IDF v5.5.5 and a user-local `~/.local/bin/idf.py` launcher.
+
+### Pooled-statistics verification (2026-10-18)
+
+- `make verify`: Ruff check/format and all 69 pytest tests pass, including Node
+  UI tests, native firmware checks and HTTP smoke tests.
+- Numerical regressions cover 3200 individual samples from unequal-length runs,
+  Gaussian/GMM sample weighting, pooled sample-level spectra, reset rejection,
+  and an open recording's immutable submission-time snapshot beyond 2000 samples.
+- Gap-aware spectrum regressions recover a known tone from missing/jittered
+  timestamps, verify sample weighting and finite constant-signal power, and
+  exercise cumulative/saved analyses after a sample loss. The reported hardware
+  recording was also recomputed read-only: all five runs and all observed
+  samples yield a finite current spectrum rather than a stale-result notice.
+- Browser checks on isolated demo data: two 40-sample runs produce one 80-sample
+  analysis and spectrum; cards never become empty during the transition.
+  Centimetre readout rounding, removal of ACF, raw/corrected selection, saved
+  full-data recomputation and 390-pixel layout without overflow were checked.
+- The pre-existing Starlette/httpx deprecation warning remains. No hardware or
+  RF precision/accuracy claim is implied by these host-only checks.
 
 ### Experiment-workspace verification (2026-10-17)
 

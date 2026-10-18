@@ -70,6 +70,12 @@ With updated STM32 firmware on both boards, connect both USB CDC ports and run:
 bash scripts/run_dashboard.sh --source dual-serial --serial-port "$UWB_TX_USB" --responder-port "$UWB_RX_USB"
 ```
 
+bash scripts/run_dashboard.sh \
+  --source dual-serial \
+  --serial-port /dev/cu.usbmodem355D365D33351 \
+  --responder-port /dev/cu.usbmodem3562365D33351
+
+
 The variables stand for your local initiator/responder device paths; keep those in
 ignored `LAB_NOTES.md`. The **Radio / sampling** panel changes ranging cadence,
 channel, preamble, data rate, and raw TX power on both boards, with acknowledgements

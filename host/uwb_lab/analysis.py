@@ -15,26 +15,26 @@ from sklearn.mixture import GaussianMixture
 METHODS = {
     "statistics": {"label": "Residual statistics", "parameters": []},
     "histogram": {"label": "Histogram + Gaussian", "parameters": ["histogram_bins"]},
-    "acf": {"label": "Autocorrelation", "parameters": ["max_lag"]},
     "psd": {"label": "Spectrum / PSD", "parameters": []},
     "gmm": {"label": "Gaussian mixture", "parameters": ["components", "seed"]},
 }
+
+SpectrumRun = tuple[str, NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]
 
 
 class AnalysisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     batch_id: str
-    scope: Literal["current", "run", "batch"] = "current"
+    scope: Literal["current", "run", "batch"] = "batch"
     run_id: str | None = None
-    mode: Literal["live", "full"] = "live"
+    mode: Literal["cumulative", "live", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
-    methods: list[Literal["statistics", "histogram", "acf", "psd", "gmm"]] = Field(
+    methods: list[Literal["statistics", "histogram", "psd", "gmm"]] = Field(
         default_factory=lambda: list(METHODS)
     )
     window_size: int = Field(default=2000, ge=1, le=2000, strict=True)
     histogram_bins: int = Field(default=30, ge=1, le=200, strict=True)
-    max_lag: int = Field(default=30, ge=1, le=2000, strict=True)
     components: int = Field(default=2, ge=1, le=6, strict=True)
     seed: int = Field(default=0, ge=0, le=2**32 - 1, strict=True)
 
@@ -156,21 +156,20 @@ def describe(values: NDArray[np.float64]) -> AnalysisResult:
         "count": "Eligible samples",
         "bias_m": "Bias",
         "std_m": "Sample standard deviation",
-        "mae_m": "MAE",
         "rmse_m": "RMSE",
-        "min_m": "Minimum residual",
-        "max_m": "Maximum residual",
     }
     metrics = [
-        Metric(key=key, label=labels[key], value=value, unit="" if key == "count" else "m")
-        for key, value in summary.items()
+        Metric(key=key, label=label, value=summary[key], unit="" if key == "count" else "m")
+        for key, label in labels.items()
     ]
-    for key, label, value in (
-        ("median_m", "Median residual", np.median(values)),
-        ("p95_abs_m", "P95 absolute error", np.quantile(np.abs(values), 0.95)),
-        ("p99_abs_m", "P99 absolute error", np.quantile(np.abs(values), 0.99)),
-    ):
-        metrics.append(Metric(key=key, label=label, value=float(value), unit="m"))
+    metrics.append(
+        Metric(
+            key="p95_abs_m",
+            label="P95 absolute error",
+            value=float(np.quantile(np.abs(values), 0.95)),
+            unit="m",
+        )
+    )
     return AnalysisResult(metrics=metrics)
 
 
@@ -205,57 +204,64 @@ def histogram(values: NDArray[np.float64], bins: int) -> AnalysisResult:
     )
 
 
-def autocorrelation(values: NDArray[np.float64], max_lag: int) -> AnalysisResult:
-    if len(values) < 2:
-        return AnalysisResult(status="unavailable", reason="ACF needs at least two residuals")
-    centered = values - np.mean(values)
-    energy = float(np.dot(centered, centered))
-    if energy == 0:
-        return AnalysisResult(status="unavailable", reason="Constant residuals")
-    lags = np.arange(min(max_lag, len(values) - 1) + 1)
-    correlation = [float(np.dot(centered[: len(values) - lag], centered[lag:]) / energy) for lag in lags]
-    return AnalysisResult(
-        warnings=["Biased normalized ACF; lags count eligible samples, not elapsed seconds"],
-        plots=[
-            Plot(
-                x_label="Sample lag",
-                y_label="Autocorrelation",
-                series=[Series(label="ACF", x=lags.tolist(), y=correlation, style="stems")],
-            )
-        ],
-    )
-
-
 def power_spectrum(
     values: NDArray[np.float64], time_ms: NDArray[np.int64], seq: NDArray[np.int64]
 ) -> AnalysisResult:
-    reason = None
-    if len(values) < 32:
-        reason = "PSD needs at least 32 eligible samples"
-    else:
+    return pooled_power_spectrum([("Run", values, time_ms, seq)])
+
+
+def pooled_power_spectrum(
+    runs: list[SpectrumRun],
+) -> AnalysisResult:
+    if not runs:
+        return AnalysisResult(status="unavailable", reason="PSD needs at least 32 eligible samples per run")
+    deltas = []
+    regular = True
+    for run_id, values, time_ms, seq in runs:
+        if len(values) < 32:
+            return AnalysisResult(
+                status="unavailable", reason=f"{run_id}: PSD needs at least 32 eligible samples per run"
+            )
+        reason = None
         delta = np.diff(time_ms.astype(float))
         median = float(np.median(delta))
         if np.any(delta <= 0):
             reason = "Device times are not strictly increasing"
-        elif np.any(np.diff(seq) != 1):
-            reason = "Sequence gaps or resets: PSD cannot compress missing samples"
-        elif np.any(np.abs(delta - median) > 0.05 * median):
-            reason = "Device-time deltas exceed the 5% regularity tolerance"
-    if reason:
-        return AnalysisResult(status="unavailable", reason=reason)
-    fs = 1000 / float(np.median(np.diff(time_ms)))
-    segment = min(256, len(values))
-    frequencies, density = signal.welch(
-        values,
-        fs=fs,
-        window="hann",
-        nperseg=segment,
-        noverlap=segment // 2,
-        detrend="constant",
-        scaling="density",
-    )
+        elif np.any(np.diff(seq) <= 0):
+            reason = "Sequence reset or duplicate: analyse separate uninterrupted recordings"
+        if reason:
+            return AnalysisResult(status="unavailable", reason=f"{run_id}: {reason}")
+        if np.any(np.diff(seq) != 1) or np.any(np.abs(delta - median) > 0.05 * median):
+            regular = False
+        deltas.append(delta)
+    all_deltas = np.concatenate(deltas)
+    period = float(np.median(all_deltas))
+    if not regular or np.any(np.abs(all_deltas - period) > 0.05 * period):
+        return _lomb_scargle_spectrum(runs)
+    fs = 1000 / period
+    segment = min(256, *(len(values) for _, values, _, _ in runs))
+    count = sum(len(values) for _, values, _, _ in runs)
+    density = np.zeros(segment // 2 + 1)
+    for _, values, _, _ in runs:
+        frequencies, run_density = signal.welch(
+            values,
+            fs=fs,
+            window="hann",
+            nperseg=segment,
+            noverlap=segment // 2,
+            detrend="constant",
+            scaling="density",
+        )
+        density += run_density * (len(values) / count)
     return AnalysisResult(
+        warnings=[
+            "Sample-weighted Welch spectra from all selected run samples; "
+            "segments never cross run boundaries. "
+            "Each segment is demeaned; intervals are not compressed into a continuous signal."
+        ],
         metrics=[
+            Metric(key="count", label="Eligible samples", value=count),
+            Metric(key="runs", label="Runs", value=len(runs)),
             Metric(key="fs_hz", label="Device-timed sample rate", value=fs, unit="Hz"),
             Metric(key="segment", label="Welch segment", value=segment, unit="samples"),
             Metric(key="resolution_hz", label="Frequency resolution", value=fs / segment, unit="Hz"),
@@ -264,7 +270,63 @@ def power_spectrum(
             Plot(
                 x_label="Frequency (Hz)",
                 y_label="PSD (m^2/Hz)",
-                series=[Series(label="Welch PSD", x=frequencies.tolist(), y=density.tolist())],
+                series=[Series(label="Pooled Welch PSD", x=frequencies.tolist(), y=density.tolist())],
+            )
+        ],
+    )
+
+
+def _lomb_scargle_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
+    spans = [float(times[-1] - times[0]) / 1000 for _, _, times, _ in runs]
+    sample_rates = [1000 / float(np.median(np.diff(times))) for _, _, times, _ in runs]
+    minimum_hz = 1 / min(spans)
+    maximum_hz = min(sample_rates) / 2
+    if minimum_hz >= maximum_hz:
+        return AnalysisResult(
+            status="unavailable", reason="Selected runs have no common resolvable frequency band"
+        )
+    points = min(4096, max(256, math.ceil(5 * min(spans) * (maximum_hz - minimum_hz))))
+    frequencies = np.linspace(minimum_hz, maximum_hz, points, endpoint=False)
+    angular = 2 * np.pi * frequencies
+    count = sum(len(values) for _, values, _, _ in runs)
+    power = np.zeros(points)
+    for _, values, times, _ in runs:
+        centered = values - np.mean(values)
+        seconds = (times - times[0]).astype(np.float64) / 1000
+        # 2/N converts unnormalized Lomb-Scargle power to explained mean-square units.
+        for start in range(0, points, 128):
+            stop = start + 128
+            power[start:stop] += (
+                2 * signal.lombscargle(seconds, centered, angular[start:stop], normalize=False) / count
+            )
+    missing = sum(int(np.sum(np.diff(seq) - 1)) for _, _, _, seq in runs)
+    return AnalysisResult(
+        warnings=[
+            "Gapped or irregular timing: using Lomb-Scargle on every eligible sample's "
+            "actual device timestamp. "
+            "No interpolation, gap compression or concatenation across runs.",
+            "Sample-weighted, mean-subtracted power (2/N scaling, m^2), not a PSD density (m^2/Hz); "
+            "do not compare its vertical scale directly with Welch PSD. Frequency grid excludes DC and "
+            "ends below the slowest run's median-cadence Nyquist estimate.",
+        ],
+        metrics=[
+            Metric(key="count", label="Eligible samples", value=count),
+            Metric(key="runs", label="Runs", value=len(runs)),
+            Metric(key="missing_samples", label="Missing sequence numbers", value=missing),
+            Metric(
+                key="resolution_hz",
+                label="Frequency grid step",
+                value=float(frequencies[1] - frequencies[0]),
+                unit="Hz",
+            ),
+        ],
+        plots=[
+            Plot(
+                x_label="Frequency (Hz)",
+                y_label="Power (m^2)",
+                series=[
+                    Series(label="Pooled Lomb-Scargle spectrum", x=frequencies.tolist(), y=power.tolist())
+                ],
             )
         ],
     )

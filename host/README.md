@@ -104,33 +104,74 @@ Recordings are written under `data/sessions/` and are intentionally ignored by G
    an active run incomplete. Detected source disconnection or host shutdown also
    interrupts the batch; it does not automatically resume.
 4. Choose analysis methods in **Analysis setup** and a dataset/scope below the
-   signal plots. Select the current run, one saved run, or all runs pooled.
+   signal plots. All runs of the selected batch are pooled by default; the
+   current run or one saved run can still be selected.
    **Recompute full closed dataset** saves a reproducible full-data result.
 
 Prior edits, radio changes, and manual recording are unavailable throughout a
 batch, including its intervals. A run with no valid measurements fails the batch.
 Consecutive automatic recordings do not imply independent physical experiments.
 
-The initial methods are residual statistics, density histogram with Gaussian
-baseline, sample-lag autocorrelation, Welch PSD, and a seeded 1-6-component GMM.
+The methods are residual statistics, density histogram with Gaussian baseline,
+pooled spectrum (Welch PSD or Lomb-Scargle power), and a seeded 1-6-component GMM.
+Autocorrelation is removed for now.
 Choose either raw or corrected range minus the **recorded** expected distance.
 These residuals include prior/geometry errors; mixture components are not
 automatically LOS/NLOS classes. No outlier trimming or correction is applied.
 The default demo varies its true distance, so its residuals are not a stationary
 sensor-noise reference.
 
-Live diagnostics use at most 2000 eligible samples and refresh through one
-coalescing background worker. Full-selection counts, bias, sample spread,
-MAE/RMSE and bounds are labelled separately from window quantiles/fits. The
-existing signal display window and its 20-sample rolling **population** spread
-are unchanged; analysis sample spread uses `ddof=1`.
+Diagnostics use every eligible sample recorded so far in the selected runs,
+including the open run, and refresh through one coalescing background worker.
+There is no 2000-sample analysis cap. Each job freezes the recording lengths at
+submission so later arrivals do not change that job's population or source hash.
+Residual statistics are limited to sample count, bias, sample standard deviation,
+RMSE and P95 absolute error. The existing signal display window and its
+20-sample rolling **population** spread are unchanged; analysis sample spread
+uses `ddof=1`.
 
-PSD requires at least 32 valid samples, consecutive sequences, increasing device
-times, and all timing deltas within 5% of their median. Frequency comes from
-device timing, not the requested rate. Ineligible data shows a reason instead
-of interpolation or an unjustified FFT. ACF and PSD stay separate for each run,
-even when distribution fitting pools the runs. At roughly 1 Hz, allow at least
-32 seconds and enough successful measurements for a spectrum.
+The histogram and its Gaussian baseline fit individual residual samples, never
+run averages. The GMM also fits those individual residuals directly (not the
+histogram bars), using expectation-maximization for the selected component count.
+Its weights are the fitted proportions, its means are residual offsets from the
+recorded prior, and its spreads are within-component standard deviations.
+The displayed component curves are weighted densities; their sum is the mixture.
+The component count is user-selected, not automatically chosen by AIC/BIC;
+those scores describe the fit and help compare models on the same data.
+
+Spectra use the full sample arrays, not run means. With consecutive sequences
+and device-time deltas within 5% of both run and pooled medians, the method
+remains Welch: spectra are computed within each run and their densities pooled
+by eligible sample count on a common grid. Segment length is at most 256
+samples, limited by the shortest run; Hann windows overlap by half. Segments
+never bridge pauses or run boundaries; their means are removed.
+
+Missing samples, irregular timestamps or differing cadences select
+**Lomb-Scargle** for the whole selection instead of rejecting it. Each run
+is mean-subtracted and analysed at its actual recorded device timestamps;
+results are pooled by sample count. All observed eligible samples contribute:
+there is no interpolation, synthetic gap filling or concatenation of pauses.
+The panel labels this as **power (m^2), not PSD density (m^2/Hz)**; its vertical
+scale is not directly comparable to Welch. The unnormalized Lomb-Scargle
+periodogram is scaled by `2/N` per run before sample-weighted pooling.
+Missing sequence counts are displayed. The common frequency grid begins at
+one cycle over the shortest run span, ends below half the slowest run's median
+cadence, and is oversampled approximately fivefold, with 256-4096 grid points.
+Grid spacing is not a claim of physical frequency resolution.
+
+Each nonempty run still needs at least 32 eligible samples, increasing device
+times and no sequence resets/duplicates. An invalid clock, reset, insufficient
+data or no common frequency band produces an explicit reason. Frequency comes
+from device timing, not the requested rate. At roughly 1 Hz, allow at least
+32 seconds and enough successful measurements per run for a spectrum.
+
+Distances/errors are displayed to 0.01 m; other fractional analysis values use
+about three significant digits and sample counts remain exact. This is display
+rounding, not a claim of centimetre accuracy: recorded data and calculations
+are not rounded. Existing cards remain visible while the selection updates,
+including run transitions. If a method is temporarily unavailable (for example
+the new run is too short for PSD), its last successful result remains with an
+explicit previous-source notice until a replacement is ready.
 
 Each batch is portable:
 
@@ -143,7 +184,7 @@ data/sessions/experiments/<batch-id>/
 ```
 
 All parsed range measurements, including invalid and inter-run measurements,
-are retained independently of live-window limits. Interval samples are excluded
+are retained independently of signal-display limits. Interval samples are excluded
 from ordinary run analysis. This is not a lossless capture of debug bytes or
 measurements lost before parsing; existing health counters still matter.
 Unfinished batches reopen as interrupted after a process crash. Saved analyses

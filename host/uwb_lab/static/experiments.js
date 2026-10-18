@@ -53,7 +53,7 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
       }
       const prior = locked ? state.prior : status.prior;
       byId("experiment-prior").textContent = prior
-        ? `${prior.mode} prior: ${prior.expected_distance_m.toFixed(4)} m, uncertainty ${prior.uncertainty_m.toFixed(4)} m; revision ${prior.revision}.`
+        ? `${prior.mode} prior: ${formatAnalysisValue(prior.expected_distance_m, "m")} m, uncertainty ${formatAnalysisValue(prior.uncertainty_m, "m")} m; revision ${prior.revision}.`
         : "Set a distance or position prior in Geometry prior below.";
       byId("experiment-state").textContent = state.batch_id
         ? `${locked ? state.phase : state.outcome} - run ${state.run_index}/${state.run_count}`

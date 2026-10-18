@@ -85,16 +85,49 @@ runs are not marked completed; unfinished archives reopen as interrupted.
 Parsed invalid samples remain archived but are excluded from analysis.
 
 `analysis.py` provides typed request/result shapes and NumPy/SciPy/scikit-learn
-diagnostics. `analysis_jobs.py` snapshots bounded live windows, directly loads
-saved records with their original expected values, and executes one background
-job plus at most one replaceable pending request. It never replays saved data
-through the current global prior. Temporal diagnostics remain per-run; pooled
-distribution fits are sample-weighted.
+diagnostics. `analysis_jobs.py` defaults to cumulative analysis of every eligible
+sample across the selected batch's runs, including an open run. It freezes each
+recording's byte length at submission, directly loads records with their original
+expected values, and executes one background job plus at most one replaceable
+pending request. It never replays saved data through the current global prior.
+The explicit API `live` mode retains its bounded window for older callers; the
+dashboard uses `cumulative`, with no analysis sample cap.
+
+Statistics show count, bias, sample standard deviation, RMSE and P95 absolute
+error. Histogram/Gaussian and GMM fits use individual residuals, not run means or
+histogram bins. The pooled PSD computes Welch on each complete run sample array
+and combines the densities weighted by eligible sample count, on a shared
+device-timed frequency grid. Welch requires at least 32 eligible samples each,
+consecutive sequences, and device-time deltas within 5% of their run median and
+the pooled median. Segment length is the smaller of 256 and the shortest run;
+Hann windows overlap by half and are individually demeaned. No segment crosses
+a run boundary.
+
+If any run has missing sequences, irregular timing or a different cadence, the
+whole selected population uses mean-subtracted Lomb-Scargle at the actual
+within-run device timestamps. No samples are interpolated or dropped, and no
+run boundaries are concatenated. Unnormalized per-run periodograms use `2/N`
+scaling, then eligible-sample-weighted pooling; the chart is explicitly **power
+(m^2)**, not Welch **density (m^2/Hz)**. The common frequency grid starts at the
+reciprocal shortest run span and ends below the slowest run's median-cadence
+Nyquist estimate, at about five points per shortest-span frequency scale
+(256-4096 points). Frequency evaluation is chunked to bound temporary arrays
+without capping samples. The grid step is not the physical resolving power.
+Sequence resets/duplicates, non-increasing clocks, fewer than 32 eligible
+samples per run or no common frequency band still produce explicit reasons.
+Saved analysis version `noise-3` distinguishes this gap-aware estimator.
+Autocorrelation is not currently exposed.
 
 Results compose metrics, tables and labelled series (`line`, `bars`, `stems`,
 `points`), rendered by dependency-free `analysis.js`; `experiments.js` supplies
 the batch controls. Existing signal plot preferences and pause-view behavior
 are separate. Numerical work does not run in the acquisition event loop.
+Display-only rounding uses 0.01 m for distance/error readouts and roughly three
+significant digits for other fractional analysis values; counts stay exact.
+Stored samples, fits and exported results retain numerical precision. While a
+selection refreshes, existing cards remain visible. A temporarily unavailable
+method retains its last successful chart with a notice identifying the previous
+source, rather than presenting it as an updated result.
 
 | Endpoint | Implemented purpose |
 | --- | --- |
@@ -108,7 +141,7 @@ are separate. Numerical work does not run in the acquisition event loop.
 | `GET /api/experiments/{batch_id}/analyses/{result_id}` | Read a saved reproducible result |
 
 Saved results retain source SHA-256, selected runs/outcomes, raw/corrected field,
-prior revisions, complete parameters/seed, window/full-data mode, analysis
+prior revisions, complete parameters/seed, cumulative/window/full-data mode, analysis
 version and numerical-library versions. No raw fields are overwritten and the
 firmware compact version-1 record is unchanged.
 

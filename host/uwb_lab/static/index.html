@@ -122,7 +122,7 @@
         <div class="section-title"><h2>Noise analysis</h2><span id="analysis-state" role="status">No dataset selected</span></div>
         <div class="analysis-selection">
           <label>Dataset<select id="analysis-dataset"><option value="">Current batch</option></select></label>
-          <label>Scope<select id="analysis-scope"><option value="current">Latest / current run</option><option value="batch">All runs (pooled distribution)</option></select></label>
+          <label>Scope<select id="analysis-scope"><option value="batch">All runs (all samples)</option><option value="current">Latest / current run</option></select></label>
         </div>
         <p id="analysis-source" class="plot-note">Residuals are relative to your prior, not necessarily intrinsic sensor noise. GMM components are exploratory, not LOS/NLOS labels.</p>
         <div id="analysis-cards" class="analysis-grid"></div>
@@ -139,10 +139,10 @@
           <fieldset id="experiment-fields" class="form-fields">
             <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
             <div class="coordinate-row">
-              <label>Run length (s)<input name="duration_s" type="number" min="0.001" step="any" value="300" required></label>
-              <label>Runs<input name="run_count" type="number" min="1" step="1" value="3" required></label>
+              <label>Run length (s)<input name="duration_s" type="number" min="0.001" step="any" value="10" required></label>
+              <label>Runs<input name="run_count" type="number" min="1" step="1" value="5" required></label>
             </div>
-            <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="10" required></label>
+            <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="0.5" required></label>
             <label>Notes<input name="notes" maxlength="200"></label>
           </fieldset>
           <p id="experiment-prior" class="plot-note">Set a distance or position prior in Geometry prior below.</p>
@@ -157,15 +157,14 @@
           <div id="analysis-methods" class="form-fields"></div>
           <details><summary>Method parameters</summary>
             <div class="form-fields">
-              <label>Live window (eligible samples)<input name="window_size" type="number" min="1" max="2000" value="2000" required></label>
               <label>Histogram bins<input name="histogram_bins" type="number" min="1" max="200" value="30" required></label>
-              <label>Maximum ACF lag<input name="max_lag" type="number" min="1" max="2000" value="30" required></label>
               <label>GMM components<input name="components" type="number" min="1" max="6" value="2" required></label>
               <label>GMM random seed<input name="seed" type="number" min="0" max="4294967295" value="0" required></label>
             </div>
           </details>
           <button id="analysis-full" type="button">Recompute full closed dataset</button>
-          <p class="plot-note">Live fits use at most 2000 samples, independently of signal plots. Full-run moments and window quantiles are labelled separately.</p>
+          <p class="plot-note">Analysis uses every eligible sample from the selected runs, independently of the signal display window. Distances/errors are rounded to 0.01 m for display only, not as a claim of accuracy. Spectra respect run boundaries: Welch PSD for regular timing, timestamp-aware Lomb-Scargle power when samples are missing or irregular.</p>
+          <p class="plot-note">The GMM fits individual residuals (selected range minus recorded expected distance), not run means or the histogram bars. Components describe weights, mean errors and spreads, not identified physical causes.</p>
           <p id="analysis-error" class="error" role="alert" hidden></p>
         </div>
       </section>
@@ -212,7 +211,7 @@
 
           <div id="distance-fields">
             <label>Expected distance (m)
-              <input name="distance_m" type="number" min="0" max="1000" step="0.001" value="2.000" required>
+              <input name="distance_m" type="number" min="0" max="1000" step="0.001" value="0.15" required>
             </label>
           </div>
 

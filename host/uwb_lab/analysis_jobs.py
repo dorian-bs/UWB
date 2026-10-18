@@ -9,7 +9,6 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from importlib.metadata import version
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -20,19 +19,17 @@ from .analysis import (
     AnalysisResult,
     AnalysisSample,
     Metric,
-    Table,
-    autocorrelation,
     describe,
     fit_gmm,
     histogram,
-    power_spectrum,
+    pooled_power_spectrum,
 )
 from .core import utc_now, write_json_atomic
 from .experiments import BatchRunner
 from .radio import _settle
 
 logger = logging.getLogger(__name__)
-ANALYSIS_VERSION = "noise-1"
+ANALYSIS_VERSION = "noise-3"
 
 
 class AnalysisService:
@@ -87,7 +84,7 @@ class AnalysisService:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        if request.mode == "live" and self.last_live is not None:
+        if request.mode != "full" and self.last_live is not None:
             old_key, old_id, submitted = self.last_live
             if old_key == key and time.monotonic() - submitted < 2 and old_id in self.jobs:
                 return self.jobs[old_id]
@@ -103,6 +100,14 @@ class AnalysisService:
             selected = {run["run_id"] for run in runs}
             records = [(run_id, dict(sample)) for run_id, sample in source if run_id in selected]
             records = records[-request.window_size :]
+        directory = self.runner.batch_path(request.batch_id)
+        sources = []
+        if records is None:
+            for run in runs:
+                path = (directory / run["session"] / "telemetry.ndjson").resolve()
+                if not path.is_relative_to(directory.resolve()):
+                    raise ValueError("Recorded session path escapes the experiment")
+                sources.append((run["run_id"], path, path.stat().st_size))
         job_id = uuid.uuid4().hex
         if self.pending:
             self.jobs[self.pending[0]]["state"] = "superseded"
@@ -120,7 +125,8 @@ class AnalysisService:
                 "batch": batch,
                 "runs": runs,
                 "records": records,
-                "directory": self.runner.batch_path(request.batch_id),
+                "directory": directory,
+                "sources": sources,
             },
         )
         while len(self.jobs) > 8:
@@ -135,7 +141,7 @@ class AnalysisService:
             if candidate is None:
                 break
             del self.jobs[candidate]
-        if request.mode == "live":
+        if request.mode != "full":
             self.last_live = key, job_id, time.monotonic()
         if self.worker is None or self.worker.done():
             self.worker = asyncio.create_task(self._drain())
@@ -192,7 +198,7 @@ class AnalysisService:
         records = snapshot["records"]
         revisions: set[int] = set()
         collected: list[tuple[str, AnalysisSample]] | deque[tuple[str, AnalysisSample]]
-        collected = [] if request.mode == "full" else deque(maxlen=request.window_size)
+        collected = deque(maxlen=request.window_size) if request.mode == "live" else []
 
         def collect(run_id: str, raw: dict[str, Any]) -> None:
             sample = AnalysisSample.model_validate(raw)
@@ -215,15 +221,16 @@ class AnalysisService:
                 collect(run_id, raw)
             excluded["invalid"] = sum(run.get("excluded_count", 0) for run in snapshot["runs"])
         else:
-            base: Path = snapshot["directory"]
-            for run in snapshot["runs"]:
-                path = (base / run["session"] / "telemetry.ndjson").resolve()
-                if not path.is_relative_to(base.resolve()):
-                    raise ValueError("Recorded session path escapes the experiment")
-                with path.open(encoding="utf-8") as stream:
-                    for line in stream:
-                        digest.update(line.encode())
-                        collect(run["run_id"], json.loads(line))
+            for run_id, path, size in snapshot["sources"]:
+                with path.open("rb") as stream:
+                    remaining = size
+                    while remaining:
+                        line = stream.readline(remaining)
+                        if not line.endswith(b"\n"):
+                            raise ValueError(f"{run_id}: incomplete recorded telemetry at snapshot boundary")
+                        remaining -= len(line)
+                        digest.update(line)
+                        collect(run_id, json.loads(line))
         grouped: dict[str, list[AnalysisSample]] = {}
         for run_id, sample in collected:
             grouped.setdefault(run_id, []).append(sample)
@@ -241,63 +248,26 @@ class AnalysisService:
         values, _, _ = arrays([sample for _, sample in collected])
         results = []
         for method in dict.fromkeys(request.methods):
-            groups = grouped.items() if method in ("acf", "psd") else [(None, None)]
-            if not grouped and method in ("acf", "psd"):
-                groups = [(None, [])]
-            for run_id, samples in groups:
-                if method == "statistics":
-                    result = describe(values)
-                    if request.mode == "live":
-                        self._full_moments(result, snapshot["runs"], request.field)
-                    timing_rows = []
-                    for run in snapshot["runs"]:
-                        samples_for_run = grouped.get(run["run_id"], [])
-                        span = cadence = None
-                        if len(samples_for_run) > 1:
-                            times_for_run = np.array([sample.time_ms for sample in samples_for_run])
-                            if np.all(np.diff(times_for_run) > 0):
-                                span = float(times_for_run[-1] - times_for_run[0]) / 1000
-                                cadence = (len(samples_for_run) - 1) / span
-                            else:
-                                result.warnings.append(
-                                    f"{run['run_id']}: device time reset; span/cadence unavailable"
-                                )
-                        timing_rows.append(
-                            [run["run_id"], len(samples_for_run), span, cadence, run.get("duration_s")]
-                        )
-                    result.tables.append(
-                        Table(
-                            columns=[
-                                "Run",
-                                "Analysed eligible n",
-                                "Device span (s)",
-                                "Observed eligible Hz",
-                                "Recorded duration (s)",
-                            ],
-                            rows=timing_rows,
-                        )
-                    )
-                elif method == "histogram":
-                    result = histogram(values, request.histogram_bins)
-                elif method == "gmm":
-                    result = fit_gmm(values, request.components, request.seed)
-                else:
-                    run_values, times, sequences = arrays(samples)
-                    result = (
-                        autocorrelation(run_values, request.max_lag)
-                        if method == "acf"
-                        else power_spectrum(run_values, times, sequences)
-                    )
-                    if len(sequences) > 1 and np.any(np.diff(sequences) != 1):
-                        result.warnings.append("Eligible samples contain sequence gaps or exclusions")
-                results.append(
-                    {
-                        "method": method,
-                        "label": METHODS[method]["label"],
-                        "run_id": run_id,
-                        "result": result.model_dump(mode="json"),
-                    }
+            if method == "statistics":
+                result = describe(values)
+                if request.mode == "live":
+                    self._full_moments(result, snapshot["runs"], request.field)
+            elif method == "histogram":
+                result = histogram(values, request.histogram_bins)
+            elif method == "gmm":
+                result = fit_gmm(values, request.components, request.seed)
+            else:
+                result = pooled_power_spectrum(
+                    [(run_id, *arrays(samples)) for run_id, samples in grouped.items()]
                 )
+            results.append(
+                {
+                    "method": method,
+                    "label": METHODS[method]["label"],
+                    "run_id": None,
+                    "result": result.model_dump(mode="json"),
+                }
+            )
         return {
             "included_count": len(collected),
             "excluded": excluded,

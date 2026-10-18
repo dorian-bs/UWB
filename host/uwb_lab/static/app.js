@@ -117,7 +117,7 @@ function radioAvailable(radio) {
 
 function startDashboard() {
   const byId = (id) => document.getElementById(id);
-  const format = (value, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : "--";
+  const format = (value) => formatAnalysisValue(value, "m");
   const view = createViewState();
   let preferences = validatePreferences(DEFAULTS);
   let recording = false;
@@ -342,7 +342,7 @@ function startDashboard() {
     const available = radioAvailable(radio);
     byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active;
     byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active;
-    byId("observed-rate").textContent = `${format(status.observed_hz, 2)} successful samples/s`;
+    byId("observed-rate").textContent = `${format(status.observed_hz)} successful samples/s`;
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
