@@ -47,6 +47,10 @@ scientific protocols, models, and metrics in [EXPERIMENTS_AND_VALIDATION.md](EXP
   Old saved preferences discard retired autocorrelation settings. Dashboard
   HTML/styles/scripts use `Cache-Control: no-store`; already-open tabs still
   need a hard refresh after a host update to replace their loaded JavaScript.
+- Dashboard calibration assistant now provides fixed-LOS antenna-delay
+  recommendations from corrected-range bias (with `raw_m` reference), but it
+  remains suggestion-only: operators must manually edit STM32 firmware values,
+  rebuild/reflash, and validate on a new run; no automatic board apply exists.
 - `TxDebug`/`RxDebug` presets select STM32 board roles without source edits; initiator emits
   compact version-1 NDJSON after successful DS-TWR exchanges, preserving readable logs.
 - ESP32-S3 bridges UART/TCP in both directions; Wi-Fi/port use `menuconfig`.

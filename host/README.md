@@ -194,6 +194,17 @@ including run transitions. If a method is temporarily unavailable (for example
 the new run is too short for PSD), its last successful result remains with an
 explicit previous-source notice until a replacement is ready.
 
+### Antenna-delay calibration assistant
+
+Use the assistant only on a fixed-distance **LOS** recording with a stable setup.
+It estimates a correction from the **corrected** range mean versus the configured
+expected distance, while also showing the corresponding `raw_m` reference so you
+can confirm the systematic offset source.
+
+Recommendations are **suggestions only**. The host/dashboard never writes antenna
+delays to boards automatically. Apply changes manually in STM32 firmware, then
+rebuild/reflash both boards and record a new validation run.
+
 Each batch is portable:
 
 ```text
