@@ -288,4 +288,8 @@ test("dashboard markup includes antenna-delay calibration assistant panel", () =
   assert.match(html, /Antenna-delay calibration assistant/);
   assert.match(html, /id="calibration-panel"/);
   assert.match(html, /id="calibration-form"/);
+  assert.match(
+    html,
+    /Recommendation only: valid for controlled fixed-LOS real-hardware captures; not for demo\/replay\./,
+  );
 });
