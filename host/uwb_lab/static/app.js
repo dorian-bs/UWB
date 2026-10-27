@@ -167,6 +167,20 @@ function calibrationSummary(state) {
   };
 }
 
+function calibrationShouldStop(state) {
+  return Boolean(
+    state?.running &&
+    Number.isInteger(state?.targetSamples) &&
+    state.targetSamples > 0 &&
+    state.captured >= state.targetSamples
+  );
+}
+
+function calibrationReset(state) {
+  Object.assign(state, createCalibrationState());
+  return { dtuPerCm: 0, errorMessage: "" };
+}
+
 function calibrationInputs(fields) {
   const knownDistanceM = Number(fields.known_distance_m);
   const targetSamples = Number(fields.target_samples);
@@ -507,7 +521,7 @@ function startDashboard() {
           view.add(message.sample);
           if (calibration.running) {
             calibrationConsumeSample(calibration, message.sample);
-            if (calibration.captured >= calibration.targetSamples) {
+            if (calibrationShouldStop(calibration)) {
               calibration.running = false;
               renderCalibration("Capture target reached. Review stats and recommendation below.");
             }
@@ -592,9 +606,9 @@ function startDashboard() {
     renderCalibration();
   });
   byId("calibration-reset").addEventListener("click", () => {
-    Object.assign(calibration, createCalibrationState());
-    calibrationDtuPerCm = 0;
-    showError("calibration-error", "");
+    const reset = calibrationReset(calibration);
+    calibrationDtuPerCm = reset.dtuPerCm;
+    showError("calibration-error", reset.errorMessage);
     renderCalibration();
   });
   byId("radio-refresh").addEventListener("click", async () => {
@@ -631,6 +645,7 @@ function startDashboard() {
 
 if (typeof module !== "undefined") module.exports = {
   DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
-  createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection, calibrationInputs,
+  createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
+  calibrationShouldStop, calibrationReset, calibrationInputs,
 };
 if (typeof document !== "undefined") startDashboard();

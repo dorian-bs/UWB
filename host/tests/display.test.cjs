@@ -32,6 +32,45 @@ test("calibration recommendation follows error sign and tolerance", () => {
   assert.equal(api.calibrationDirection({ errorM: 0.005, toleranceM: 0.01 }), "none");
 });
 
+test("calibration form inputs reject invalid values and parse valid entries", () => {
+  assert.throws(
+    () => api.calibrationInputs({ known_distance_m: "0", target_samples: "10", tolerance_m: "0.01", dtu_per_cm: "42" }),
+    /Known distance must be a positive finite value in meters/,
+  );
+  assert.throws(
+    () => api.calibrationInputs({ known_distance_m: "2", target_samples: "1", tolerance_m: "0.01", dtu_per_cm: "42" }),
+    /Target samples must be an integer greater than or equal to 2/,
+  );
+  assert.throws(
+    () => api.calibrationInputs({ known_distance_m: "2", target_samples: "10", tolerance_m: "-0.01", dtu_per_cm: "42" }),
+    /Tolerance must be a finite value greater than or equal to 0/,
+  );
+  assert.throws(
+    () => api.calibrationInputs({ known_distance_m: "2", target_samples: "10", tolerance_m: "0.01", dtu_per_cm: "-1" }),
+    /DTU-per-cm hint must be blank or a finite value greater than or equal to 0/,
+  );
+  assert.deepEqual(
+    plain(api.calibrationInputs({ known_distance_m: "2.5", target_samples: "12", tolerance_m: "0.015", dtu_per_cm: "18.2" })),
+    { knownDistanceM: 2.5, targetSamples: 12, toleranceM: 0.015, dtuPerCm: 18.2 },
+  );
+});
+
+test("calibration lifecycle helpers support autostop checks and reset without DOM state", () => {
+  const state = api.createCalibrationState();
+  api.calibrationStart(state, { knownDistanceM: 3, targetSamples: 2, toleranceM: 0.01 });
+  assert.equal(api.calibrationShouldStop(state), false);
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: 3.01 });
+  assert.equal(api.calibrationShouldStop(state), false);
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: 2.99 });
+  assert.equal(api.calibrationShouldStop(state), true);
+
+  state.skipped = 5;
+  const reset = api.calibrationReset(state);
+  assert.equal(reset.dtuPerCm, 0);
+  assert.equal(reset.errorMessage, "");
+  assert.deepEqual(plain(state), plain(api.createCalibrationState()));
+});
+
 test("calibration summary reports not-enough-data for fewer than 2 corrected samples", () => {
   const state = api.createCalibrationState();
   api.calibrationStart(state, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
