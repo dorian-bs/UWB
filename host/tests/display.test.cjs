@@ -16,6 +16,31 @@ test("display helpers are available without a browser", () => {
   assert.equal(typeof api.axisBounds, "function");
 });
 
+test("calibration helper accumulates corrected/raw samples and tracks skipped values", () => {
+  const state = api.createCalibrationState();
+  api.calibrationStart(state, { knownDistanceM: 5, targetSamples: 3, toleranceM: 0.01 });
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: 5.04, raw_m: 5.07 });
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: Number.NaN, raw_m: 5.05 });
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: 4.99, raw_m: 5.01 });
+  assert.equal(state.captured, 2);
+  assert.equal(state.skipped, 1);
+});
+
+test("calibration recommendation follows error sign and tolerance", () => {
+  assert.equal(api.calibrationDirection({ errorM: 0.02, toleranceM: 0.01 }), "increase");
+  assert.equal(api.calibrationDirection({ errorM: -0.02, toleranceM: 0.01 }), "decrease");
+  assert.equal(api.calibrationDirection({ errorM: 0.005, toleranceM: 0.01 }), "none");
+});
+
+test("calibration summary reports not-enough-data for fewer than 2 corrected samples", () => {
+  const state = api.createCalibrationState();
+  api.calibrationStart(state, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
+  api.calibrationConsumeSample(state, { valid: true, corrected_m: 2.02, raw_m: 2.04 });
+  const summary = api.calibrationSummary(state);
+  assert.equal(summary.ready, false);
+  assert.match(summary.message, /not enough data/i);
+});
+
 test("radio form converts units and validates raw TX power without silent coercion", () => {
   const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xA0A0A0A0" };
   assert.deepEqual(plain(api.radioPayload(fields)), {

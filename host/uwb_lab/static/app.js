@@ -91,6 +91,82 @@ function createViewState(limit = 2000) {
   };
 }
 
+function createCalibrationState() {
+  return {
+    running: false,
+    knownDistanceM: null,
+    targetSamples: 0,
+    toleranceM: 0.01,
+    captured: 0,
+    skipped: 0,
+    corrected: [],
+    raw: [],
+  };
+}
+
+function calibrationStart(state, { knownDistanceM, targetSamples, toleranceM = 0.01 }) {
+  Object.assign(state, createCalibrationState(), {
+    running: true,
+    knownDistanceM,
+    targetSamples,
+    toleranceM,
+  });
+  return state;
+}
+
+function calibrationConsumeSample(state, sample) {
+  if (!state?.running) return state;
+  const corrected = sample?.corrected_m;
+  if (sample?.valid !== true || !Number.isFinite(corrected)) {
+    state.skipped += 1;
+    return state;
+  }
+  state.corrected.push(corrected);
+  if (Number.isFinite(sample?.raw_m)) state.raw.push(sample.raw_m);
+  state.captured += 1;
+  return state;
+}
+
+function calibrationDirection({ errorM, toleranceM }) {
+  if (!Number.isFinite(errorM) || !Number.isFinite(toleranceM) || toleranceM < 0) return "none";
+  if (Math.abs(errorM) <= toleranceM) return "none";
+  return errorM > 0 ? "increase" : "decrease";
+}
+
+function calibrationSummary(state) {
+  const summarize = (values) => {
+    const count = values.length;
+    if (!count) return { count: 0, mean: Number.NaN, std: Number.NaN };
+    const mean = values.reduce((sum, value) => sum + value, 0) / count;
+    const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / count;
+    return { count, mean, std: Math.sqrt(variance) };
+  };
+  const corrected = summarize(state?.corrected ?? []);
+  const raw = summarize(state?.raw ?? []);
+  if (corrected.count < 2) {
+    return {
+      ready: false,
+      message: "Not enough data to calibrate yet; capture at least 2 valid corrected samples.",
+      direction: "none",
+      errorM: Number.NaN,
+      corrected,
+      raw,
+    };
+  }
+  const errorM = corrected.mean - state.knownDistanceM;
+  const direction = calibrationDirection({ errorM, toleranceM: state.toleranceM });
+  return {
+    ready: true,
+    message: direction === "none"
+      ? "Calibration is within tolerance."
+      : `Recommendation: ${direction} antenna delay.`,
+    direction,
+    errorM,
+    corrected,
+    raw,
+  };
+}
+
 function radioPayload(fields) {
   const payload = {};
   for (const key of ["sampling_hz", "channel", "preamble", "data_rate"]) {
@@ -464,5 +540,6 @@ function startDashboard() {
 
 if (typeof module !== "undefined") module.exports = {
   DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
+  createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
 };
 if (typeof document !== "undefined") startDashboard();
