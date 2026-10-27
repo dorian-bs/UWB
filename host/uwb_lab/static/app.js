@@ -202,6 +202,13 @@ function calibrationInputs(fields) {
   return { knownDistanceM, targetSamples, toleranceM, dtuPerCm };
 }
 
+function resolveCalibrationStatusMessage({ statusNote = "", stickyNote = "", hasActivity, recommendation }) {
+  if (statusNote) return statusNote;
+  if (stickyNote) return stickyNote;
+  if (hasActivity) return recommendation;
+  return "Start capture to compute a recommendation.";
+}
+
 function radioPayload(fields) {
   const payload = {};
   for (const key of ["sampling_hz", "channel", "preamble", "data_rate"]) {
@@ -236,6 +243,7 @@ function startDashboard() {
   let radioInitialized = false;
   let radioSubmitting = false;
   let calibrationDtuPerCm = 0;
+  let calibrationStickyNote = "";
   const calibration = createCalibrationState();
   const showError = (id, message) => {
     byId(id).textContent = message;
@@ -337,11 +345,12 @@ function startDashboard() {
     byId("calibration-state").textContent = calibration.running
       ? `Capturing ${calibration.captured}/${calibration.targetSamples}`
       : calibration.captured || calibration.skipped ? "Stopped" : "Idle";
-    byId("calibration-recommendation").textContent = statusNote || (
-      calibration.captured || calibration.skipped || calibration.running
-        ? recommendationText(summary)
-        : "Start capture to compute a recommendation."
-    );
+    byId("calibration-recommendation").textContent = resolveCalibrationStatusMessage({
+      statusNote,
+      stickyNote: calibrationStickyNote,
+      hasActivity: calibration.captured || calibration.skipped || calibration.running,
+      recommendation: recommendationText(summary),
+    });
   }
 
   function drawChart(canvas, samples, settings) {
@@ -523,7 +532,7 @@ function startDashboard() {
             calibrationConsumeSample(calibration, message.sample);
             if (calibrationShouldStop(calibration)) {
               calibration.running = false;
-              renderCalibration("Capture target reached. Review stats and recommendation below.");
+              calibrationStickyNote = "Capture target reached. Review stats and recommendation below.";
             }
           }
         }
@@ -594,6 +603,7 @@ function startDashboard() {
     try {
       const fields = calibrationInputs(Object.fromEntries(new FormData(event.target)));
       calibrationDtuPerCm = fields.dtuPerCm;
+      calibrationStickyNote = "";
       calibrationStart(calibration, fields);
       renderCalibration("Capture started: collecting valid corrected samples from incoming telemetry.");
     } catch (error) {
@@ -603,11 +613,13 @@ function startDashboard() {
   });
   byId("calibration-stop").addEventListener("click", () => {
     calibration.running = false;
+    calibrationStickyNote = "";
     renderCalibration();
   });
   byId("calibration-reset").addEventListener("click", () => {
     const reset = calibrationReset(calibration);
     calibrationDtuPerCm = reset.dtuPerCm;
+    calibrationStickyNote = "";
     showError("calibration-error", reset.errorMessage);
     renderCalibration();
   });
@@ -646,6 +658,6 @@ function startDashboard() {
 if (typeof module !== "undefined") module.exports = {
   DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
   createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
-  calibrationShouldStop, calibrationReset, calibrationInputs,
+  calibrationShouldStop, calibrationReset, calibrationInputs, resolveCalibrationStatusMessage,
 };
 if (typeof document !== "undefined") startDashboard();

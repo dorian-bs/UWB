@@ -103,6 +103,38 @@ test("calibration summary recommendation text is explicit for increase/decrease/
   assert.equal(none.message, "Within tolerance (±0.010 m); no antenna-delay change suggested.");
 });
 
+test("calibration status message preserves sticky autostop notice when no new status note is passed", () => {
+  const recommendation = "Recommendation: increase TX/RX antenna delays equally on both boards.";
+  const autostop = "Capture target reached. Review stats and recommendation below.";
+  assert.equal(
+    api.resolveCalibrationStatusMessage({
+      statusNote: "",
+      stickyNote: autostop,
+      hasActivity: true,
+      recommendation,
+    }),
+    autostop,
+  );
+  assert.equal(
+    api.resolveCalibrationStatusMessage({
+      statusNote: "Capture started: collecting valid corrected samples from incoming telemetry.",
+      stickyNote: autostop,
+      hasActivity: true,
+      recommendation,
+    }),
+    "Capture started: collecting valid corrected samples from incoming telemetry.",
+  );
+  assert.equal(
+    api.resolveCalibrationStatusMessage({
+      statusNote: "",
+      stickyNote: "",
+      hasActivity: true,
+      recommendation,
+    }),
+    recommendation,
+  );
+});
+
 test("radio form converts units and validates raw TX power without silent coercion", () => {
   const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xA0A0A0A0" };
   assert.deepEqual(plain(api.radioPayload(fields)), {
