@@ -1,11 +1,15 @@
 # Experiments and Validation
 
-These are research requirements, not a claim that all metadata, checks, or models are implemented.
-See [status and roadmap](IMPLEMENTATION_STATUS.md) for progress.
+Start with fixed-distance recordings and the implemented diagnostics below.
+The later modelling/evaluation sections are guidance if the project reaches that
+stage, not a checklist of features to build. See [current status](IMPLEMENTATION_STATUS.md).
 
 ## Measurement protocol
 
-Record at acquisition time; do not retrospectively infer available metadata. Each manifest should include:
+Record conditions at acquisition time rather than trying to infer them later.
+Start by noting measured distance/uncertainty, LOS or obstruction, orientation,
+radio settings, and run duration. Add the following to lab notes when available;
+the current host does not collect all of this automatically:
 
 - Session ID, UTC start/end, operator, notes; firmware commit/build IDs for both nodes and bridge.
 - Device IDs/roles, antenna IDs/orientations/mounting/delays.
@@ -39,25 +43,39 @@ from run statistics/fits. Stop/disconnect/shutdown preserves incomplete status;
 no automatic physical reset or independence guarantee is implied.
 
 Use the [host workflow](../host/README.md#repeated-experiments-and-noise-analysis)
-to select live or saved batches. Live fits/quantiles use a labelled bounded
-window of at most 2000 eligible samples; cheap full-selection moments remain
-separate. Full-data recomputation uses closed files and saves its recipe,
+to select live or saved batches. All methods use every eligible individual
+sample recorded so far in the selected runs, including an open run. The browser's
+2000-sample display buffer is unrelated to analysis. Each job freezes input file
+lengths at submission. Full-data recomputation uses closed files and saves its recipe,
 source fingerprint, outcomes, prior references, seed and library versions.
 
 | Method | Implemented semantics |
 | --- | --- |
-| Summary | Bias, sample standard deviation (`ddof=1`), median, MAE/RMSE, bounds and linear-interpolated P95/P99 absolute error |
+| Summary | Count, signed bias, sample standard deviation (`ddof=1`), RMSE and linear-interpolated P95 absolute error |
 | Histogram / Gaussian | Density-normalized histogram and single-Gaussian maximum-likelihood baseline; degenerate constant fits are flagged |
-| ACF | Demeaned, zero-lag-normalized biased autocorrelation against eligible-sample lag; constants unavailable, sequence gaps flagged |
-| Welch PSD | Hann window, constant detrending, density in m²/Hz, segment `min(256,n)`, half overlap; at least 32 samples |
+| Spectrum | Sample-weighted within-run Welch density for regular timing, or Lomb-Scargle power for gaps/irregular cadence; at least 32 eligible samples per run |
 | GMM | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads, likelihood, AIC/BIC |
 
-PSD requires increasing device times, consecutive sequences and every time
-delta within 5% of its median. The median device-time delta determines sample
-frequency; the requested radio rate is never substituted. Gaps, resets,
-irregular timing and insufficient data produce an explicit unavailable reason,
-not interpolated or time-compressed samples. Neither PSD nor ACF concatenates
-different runs. Pooled distributions weight samples, not sessions equally.
+Welch requires increasing device times, consecutive sequences and every time
+delta within 5% of both its run median and the pooled median. The median
+device-time delta determines sample frequency, never the requested radio rate.
+Each run is analysed separately using Hann windows, constant detrending, half
+overlap, and segment length `min(256, shortest run length)`. Densities in m²/Hz
+are pooled by eligible sample count on a common frequency grid.
+
+Missing samples, irregular timing, or differing cadences select Lomb-Scargle for
+the whole selection. Each run is mean-subtracted and evaluated at its actual
+device timestamps; unnormalized periodograms use `2/N` scaling and sample-weighted
+pooling. Results are power in m², **not PSD density**, so their scale is not
+directly comparable with Welch.
+The shared frequency grid starts at the reciprocal shortest run span and ends
+below half the slowest median cadence, with 256-4096 points at approximately five
+points per shortest-span frequency scale. Grid spacing is not physical resolution.
+
+No interpolation, gap compression, or concatenation across run boundaries occurs.
+Resets/duplicate sequences, non-increasing clocks, fewer than 32 eligible samples
+per run, or no common frequency band produce explicit unavailable reasons.
+Autocorrelation is not currently exposed by the dashboard.
 
 Choose `raw_m - expected_m` or `corrected_m - expected_m` using the expected
 value stored with each sample. Invalid/no-reference/non-finite measurements
@@ -289,9 +307,10 @@ For an interpretable first comparison:
 An increase in packet success, a smoother plotted line, or a smaller rolling spread
 alone is insufficient evidence that a setting improves ranging accuracy.
 
-## Session-close data quality
+## Data-quality checks to make during experiments
 
-Automatically check:
+Inspect counts and plots before trusting a recording. More complete automatic
+checks remain future work; boot IDs and annotations are not yet available:
 
 - Required metadata/units; unique `(device_id, boot_id, sequence)`; gaps, duplicates, reordering, boot changes.
 - Monotonic device time per boot; bounds/non-finite ranges flagged, never silently removed.
@@ -315,7 +334,7 @@ Where possible add session/environment-grouped cross-validation to the frozen te
 
 Advanced methods must outperform relevant simple baselines on independent sessions.
 
-## Candidate models
+## Optional candidate models
 
 | Model | Best use | Caution |
 | --- | --- | --- |
@@ -326,27 +345,24 @@ Advanced methods must outperform relevant simple baselines on independent sessio
 | Tree/linear classifier | Interpretable diagnostic baseline | Future-window feature leakage |
 | Temporal neural network | Complex nonlinear sequences | Data volume/calibration/overfit |
 
-Start interpretable; justify complexity with residual diagnostics and learning curves.
-Implementation order and model-provenance requirements live in the
-[roadmap](IMPLEMENTATION_STATUS.md#phase-5---losnlos-and-temporal-models).
+These are alternatives, not a requirement to implement every model.
+Start with no correction and a simple Gaussian/threshold baseline; justify any
+additional complexity with independent data and residual diagnostics.
 
 ## Metrics
 
-| Task | Required reporting |
+For the initial report, use sample counts, bias, sample spread, RMSE, P95 error,
+and labelled plots across independent conditions. The following are extensions
+when the corresponding prediction/classification task is actually attempted:
+
+| Task | Relevant reporting |
 | --- | --- |
 | Range/bias | Signed bias by condition/distance; MAE/RMSE; median and 95th/99th percentile absolute error; probabilistic negative log likelihood; interval coverage/width; corrected-residual autocorrelation |
 | LOS/NLOS | Per-class precision/recall/F1; balanced accuracy/confusion matrix; AUROC and especially AUPRC for imbalance; transition delay; false transitions/alarms per minute; probability calibration |
 
 Bootstrap confidence intervals **by session**, not as if correlated samples were independent.
-Live output uses bounded causal windows and provisional labels; clearly mark provisional predictions.
-Final results run from closed files with fixed configuration. Never write predictions into raw telemetry.
-
-## Follow-on features
-
-- Camera/event-button labels with privacy policy; odometry/motion-capture dynamic ground truth.
-- Event-triggered CIR snapshots to limit bandwidth; antenna-delay calibration wizard.
-- Device/firmware/environment quality dashboard; uncertain-interval active-learning review.
-- Out-of-distribution warnings; downstream Kalman/particle-filter localization benchmark.
-
-Near-term value: annotations, replay, loss counters, and radio diagnostics improve both reliability
-and every subsequent model comparison.
+If live predictions are added, use past-only inputs and clearly mark provisional
+labels. Final results run from closed files with fixed configuration.
+Never write predictions into raw telemetry. The practical next steps are
+fixed-distance collection, manual antenna-delay validation, simple labels, and
+radio diagnostics, not a larger modelling platform.

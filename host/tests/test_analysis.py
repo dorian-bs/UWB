@@ -13,15 +13,20 @@ def test_analysis_contracts():
     assert request.field == "corrected_m"
     assert request.mode == "cumulative"
     assert AnalysisRequest(batch_id="batch-a").scope == "batch"
-    assert request.window_size == 2000
     with pytest.raises(ValidationError):
         AnalysisRequest(batch_id="batch-a", scope="run")
     with pytest.raises(ValidationError):
         AnalysisRequest(batch_id="batch-a", components=7)
-    with pytest.raises(ValidationError):
-        AnalysisRequest(batch_id="batch-a", window_size=True)
     result = AnalysisResult(status="unavailable", reason="No valid samples")
     json.dumps(result.model_dump(mode="json"), allow_nan=False)
+
+
+@pytest.mark.parametrize("retired", [{"mode": "live"}, {"window_size": 10}])
+def test_analysis_rejects_retired_window_parameters(retired):
+    from uwb_lab.analysis import AnalysisRequest
+
+    with pytest.raises(ValidationError):
+        AnalysisRequest.model_validate({"batch_id": "batch-a", **retired})
 
 
 def test_summary_and_running_moments():

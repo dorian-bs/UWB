@@ -28,12 +28,11 @@ class AnalysisRequest(BaseModel):
     batch_id: str
     scope: Literal["current", "run", "batch"] = "batch"
     run_id: str | None = None
-    mode: Literal["cumulative", "live", "full"] = "cumulative"
+    mode: Literal["cumulative", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
     methods: list[Literal["statistics", "histogram", "psd", "gmm"]] = Field(
         default_factory=lambda: list(METHODS)
     )
-    window_size: int = Field(default=2000, ge=1, le=2000, strict=True)
     histogram_bins: int = Field(default=30, ge=1, le=200, strict=True)
     components: int = Field(default=2, ge=1, le=6, strict=True)
     seed: int = Field(default=0, ge=0, le=2**32 - 1, strict=True)

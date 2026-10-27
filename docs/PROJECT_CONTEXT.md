@@ -15,10 +15,14 @@ Investigate:
 
 ## Scope
 
-**In scope:** two-node DS-TWR; USB serial/ESP32 Wi-Fi telemetry; timestamped recordings with
-metadata/annotations; browser-entered geometric priors; baseline/time-series analysis;
-Gaussian, GP, HMM, autoregressive, change-point, and neural methods where data justifies them;
-whole-session train/validation/test splits and independent-environment evaluation.
+**Core scope:** two-node DS-TWR; USB serial/ESP32 Wi-Fi telemetry; timestamped
+recordings; browser-entered geometry priors; repeated fixed-condition experiments;
+simple noise statistics, distributions, spectra, and calibration checks.
+
+**Possible research extensions:** timestamped LOS/NLOS annotations, a simple
+threshold/classifier, or one temporal model justified by the collected data.
+GPs, HMMs, autoregressive and neural methods are options, not required features.
+Use whole-session splits and independent-condition evaluation if fitting models.
 
 **Not initially:** multi-anchor 2D/3D localization, closed-loop robot control, MCU learned models,
 or treating operator geometry as ground truth without documented uncertainty.
@@ -40,15 +44,18 @@ These may follow a stable two-node pipeline.
 
 ## Success criteria and constraints
 
-**Engineering:** connect and see range/health; start/stop recording; apply distance/position priors
-within one display update without restarting acquisition; trace every sample to device, firmware,
-radio config, host receive time, session, and prior revision; replay through the live parser/analysis/UI.
-Expose disconnects, malformed frames, dropped sequences, and clock resets rather than hiding them.
+**Engineering:** connect and see range/health; start/stop recording; apply
+distance/position priors without restarting acquisition; keep raw measurements
+and prior revisions; replay without boards. Show disconnects, malformed frames,
+and dropped-sequence counts rather than hiding them.
+Firmware build/boot identity and richer clock/reset diagnostics are useful future
+metadata, not capabilities already supplied by the current recordings.
 
-**Scientific:** reproduce raw data, labels, splits, preprocessing, and metrics; compare against
-no-correction/simple Gaussian baselines; separate complete runs/trajectories and preferably environments,
-not shuffled adjacent samples; assess uncertainty calibration and point accuracy; report transition
-behavior, imbalance, and delay for LOS/NLOS.
+**Scientific:** explain bias, spread, and outliers from repeated measured-distance
+recordings; keep enough conditions and notes to reproduce the experiment.
+If fitting corrections/classifiers, compare against simple baselines and separate
+whole runs, not shuffled adjacent samples. Evaluate uncertainty or LOS/NLOS
+transition metrics only when the corresponding model/labels exist.
 Detailed protocols and metrics live in [EXPERIMENTS_AND_VALIDATION.md](EXPERIMENTS_AND_VALIDATION.md).
 
 Keep the research stack Python-first and exploratory analysis on the host; MCUs do deterministic

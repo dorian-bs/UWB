@@ -4,17 +4,6 @@ import importlib
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    module = importlib.import_module("uwb_lab.app")
-    runtime = module.Runtime(data_dir=tmp_path)
-    runtime.source = "demo"
-    monkeypatch.setattr(module, "runtime", runtime)
-    with TestClient(module.app) as connection:
-        yield connection
 
 
 @pytest.mark.parametrize(
@@ -25,6 +14,12 @@ def test_dashboard_assets_are_not_cached_across_host_updates(client, path):
     response = client.get(path)
     assert response.status_code == 200
     assert response.headers.get("cache-control") == "no-store"
+
+
+@pytest.mark.parametrize("retired", [{"mode": "live"}, {"window_size": 10}])
+def test_analysis_api_rejects_retired_window_parameters(client, retired):
+    response = client.post("/api/analysis/jobs", json={"batch_id": "unused", **retired})
+    assert response.status_code == 422
 
 
 def test_batch_locks_prior_and_manual_recording(client):

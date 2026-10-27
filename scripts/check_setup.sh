@@ -17,7 +17,8 @@ check_command() {
 echo "Host tools (needed for: make verify, make test, make demo, make replay)"
 
 if [[ -x "${ROOT_DIR}/.venv/bin/python" ]] && \
-   "${ROOT_DIR}/.venv/bin/python" -c "import fastapi, serial, uvicorn, websockets, pytest, ruff" 2>/dev/null; then
+   "${ROOT_DIR}/.venv/bin/python" -c \
+     "import fastapi, httpx, numpy, scipy, sklearn, serial, uvicorn, websockets, pytest, ruff" 2>/dev/null; then
   printf "[ok] %-22s %s\n" "Python host" "${ROOT_DIR}/.venv/bin/python"
 else
   echo "[missing] Python host environment"
@@ -29,6 +30,13 @@ if command -v node >/dev/null 2>&1 && \
   printf "[ok] %-22s %s\n" "Node.js (tests only)" "$(node --version)"
 else
   echo "[missing] Node.js 18+ (needed for dashboard tests, not demo/replay)"
+  host_errors=$((host_errors + 1))
+fi
+
+if command -v cc >/dev/null 2>&1; then
+  printf "[ok] %-22s %s\n" "C compiler (tests)" "$(command -v cc)"
+else
+  echo "[missing] Native C compiler (needed for firmware harness tests; on macOS: xcode-select --install)"
   host_errors=$((host_errors + 1))
 fi
 

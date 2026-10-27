@@ -1,211 +1,128 @@
- # UWB Ranging Project
+# UWB Ranging Project
 
-Semester-project setup for DW3000 ranging, an STM32/ESP32 link, and a small Python live dashboard.
+A university semester project for measuring DW3000 ranging noise. Two STM32 nodes
+measure distance; a small Python dashboard plots, records, replays, and analyses it.
+An ESP32 can bridge the telemetry over Wi-Fi.
 
-Working on this with an AI coding agent? Point it at [CLAUDE.md](CLAUDE.md) — it is the
-orientation doc that explains the layout, the telemetry contract, and what to run without hardware.
+The project deliberately uses plain Python, HTML, CSS, and JavaScript: no frontend
+build step, database server, or deployment platform.
 
-Run `make help` to see every command, grouped by whether it needs hardware.
+## Start without hardware
 
-## New Mac setup
-
-Requirements: macOS on Apple Silicon and [Homebrew](https://brew.sh).
-
-Clone and set up the project:
+Use Python **3.11 or newer**. From the repository root:
 
 ```bash
-git clone https://github.com/dorian-bs/UWB.git
-cd UWB
-bash scripts/setup_macos.sh
-make build
-make test
-```
-
-The setup is safe to rerun. It installs:
-
-- CMake, Ninja, OpenOCD, dfu-util, Python 3.13, and Node.js (dashboard tests only)
-  through Homebrew when missing.
-- Arm GNU Toolchain 14.3.rel1 under `~/.local/`.
-- ESP-IDF v5.5.5 and ESP32-S3 tools under `~/esp/` and `~/.espressif/`.
-- Host Python dependencies in the repository `.venv/`.
-
-Use `make check` at any time to diagnose an incomplete setup.
-
-## Try the dashboard
-
-```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e './host[dev]'
 make demo
 ```
 
-Open <http://127.0.0.1:8000>. This uses generated data and requires no hardware.
+Open <http://127.0.0.1:8000>. Stop with `Ctrl+C`.
+Use `make replay` instead to view the committed synthetic session with an NLOS-like
+obstruction. Neither command needs firmware tools or boards.
 
-To see the dashboard against a recorded-looking session, including a simulated NLOS
-obstruction, use `make replay`.
+The dashboard supports:
 
-### Explore the data
+- Raw/corrected distance, a geometry prior, residuals, and rolling bias/spread.
+- Recording and replay, with raw measurements kept unchanged.
+- Repeated timed runs and basic noise analysis: statistics, histogram/Gaussian,
+  spectrum, and Gaussian mixtures.
+- A suggestion-only antenna-delay calibration assistant.
+- Physical radio controls when both boards are connected over USB.
 
-Each plot has its own checkboxes for raw/corrected/expected distance (left axis) and
-residual, rolling bias and spread (right axis). Enable **Show Plot 2** for a second plot
-with all six traces available independently; it initially selects residual only.
-Open **Plot 1 axis limits** or **Plot 2 axis limits** for that plot's auto/manual scales.
-Selections and limits are remembered separately, including when Plot 2 is hidden.
-The shared toolbar sets the last N samples, plot height, and lines/points for both plots.
-**Hide experiment controls** gives the plots more room.
-**Radio / sampling** and **Geometry prior** expand independently when you click their
-headings. Both start collapsed on page load. Collapsing them preserves entered values
-and does not stop acquisition or recording; the Recording section remains visible.
+See the [host guide](host/README.md) for the controls, data files, and limitations.
 
-**Pause view** freezes charts and measurement readouts while acquisition, recording and
-health counters continue. Resume returns to the latest samples. Display settings are
-remembered locally; **Reset display** restores defaults without changing your prior or
-recording. The display window does not change the host's 20-residual rolling calculations.
-Up to 2000 samples accumulate in the browser; reconnecting starts from the host's
-up-to-300-sample snapshot. Missing prior-derived values are not plotted as zero.
-
-### Change the physical radio while plotting
-
-With updated STM32 firmware on both boards, connect both USB CDC ports and run:
+## Change and check code
 
 ```bash
-bash scripts/run_dashboard.sh --source dual-serial --serial-port "$UWB_TX_USB" --responder-port "$UWB_RX_USB"
+make verify   # Python lint/format checks, host/API tests, JS tests, native C harnesses
+make fmt      # Format and auto-fix Python
+make help     # All available commands
 ```
 
-bash scripts/run_dashboard.sh \
-  --source dual-serial \
-  --serial-port /dev/cu.usbmodem355D365D33351 \
-  --responder-port /dev/cu.usbmodem3562365D33351
+Full verification also needs **Node.js 18+** and a native **C compiler**.
+Node is for tests only; it is not needed to run the dashboard.
+On macOS, install Node with `brew install node` and the compiler with
+`xcode-select --install` if missing. The native firmware tests do not need the Arm
+toolchain; they are skipped if no native compiler is available.
 
+| Where | What to edit |
+| --- | --- |
+| [host/uwb_lab/](host/uwb_lab/) | Acquisition, priors, recording, experiments, analysis, API |
+| [host/uwb_lab/static/](host/uwb_lab/static/) | Plain browser UI |
+| [host/tests/](host/tests/) | Hardware-free regression tests |
+| [qorvo_port.c](epuck-stm32-main/ThirdParty/qorvo_dw3/platform/qorvo_port.c) | STM32 radio/ranging logic |
+| [ESP32 main.c](epuck-esp32-main/main/main.c) | UART/TCP transport |
 
-The variables stand for your local initiator/responder device paths; keep those in
-ignored `LAB_NOTES.md`. The **Radio / sampling** panel changes ranging cadence,
-channel, preamble, data rate, and raw TX power on both boards, with acknowledgements
-and rollback if a change fails. Existing graph history is retained. Requested
-cadence and observed successful-sample rate are shown separately.
-Demo, replay, and single-board connections cannot change physical radio settings.
-See [dual-USB instructions and limitations](host/README.md#live-radio-settings-two-usb-connected-boards).
+Keep changes small and easy to explain. Preserve raw data, test with synthetic or
+recorded lines, and do not add infrastructure for hypothetical future needs.
+AI coding agents should start with [CLAUDE.md](CLAUDE.md).
 
-## Change host code
+## Hardware setup on a new Mac
+
+The full bootstrap supports macOS on Apple Silicon with [Homebrew](https://brew.sh):
 
 ```bash
-make verify   # ruff lint/format check + all host tests
-make fmt      # auto-format and auto-fix
+make setup
+make check
+make build
 ```
 
-`make verify` needs no boards. Radio tests compile small native C harnesses and use
-isolated virtual serial ports; a native C compiler is required. Run it before committing host changes.
-The dashboard logic tests also require Node.js 18+ (`brew install node` if missing);
-Node is only used for testing, not running the dashboard.
+`make setup` installs missing host tools/dependencies, Arm GNU Toolchain 14.3.rel1,
+and ESP-IDF v5.5.5. It is safe to rerun, but is unnecessary for host-only work if
+you followed the quick start above. `make check` reports host and firmware tools
+separately; missing firmware tools do not prevent demo/replay.
 
-## Configure and flash hardware
+### Configure and flash
 
-Configure the ESP32 network without storing credentials in Git:
+Set Wi-Fi credentials in the ignored ESP32 configuration, never in source:
 
 ```bash
 make esp-config
 make esp-flash
 ```
 
-Build both STM32 images with `make build`. Then connect the appropriate board and run:
+After building the STM32 images, connect **only the board being flashed**:
 
-```bash
-make stm-tx-flash
-make stm-rx-flash
-```
-if using a ST-link, or:
-```bash
-make stm-tx-dfu-flash
-make stm-rx-dfu-flash
-```
-if using USB-C.
+| Board | ST-Link | USB DFU bootloader |
+| --- | --- | --- |
+| Initiator (TX) | `make stm-tx-flash` | `make stm-tx-dfu-flash` |
+| Responder (RX) | `make stm-rx-flash` | `make stm-rx-dfu-flash` |
 
-Only one STM32 should be connected when running each flash command. The TX board computes and publishes range measurements.
+Only the initiator publishes range measurements. Firmware builds and flashing
+are separate from `make verify` and require the appropriate tools/boards.
 
-Start the dashboard with the ESP32 IP address:
+### Connect the dashboard
 
-```bash
-bash scripts/run_dashboard.sh --source tcp --tcp-host ESP32_IP
-```
-
-## Common runtime commands
-
-Use these commands during bring-up and debugging.
-
-Addresses and serial paths differ per machine and per lab session, so they are not recorded here.
-Keep yours in `LAB_NOTES.md` — copy [the template](docs/LAB_NOTES.example.md) to start one:
+Addresses and serial paths are local to your lab. Copy the ignored notes template:
 
 ```bash
 cp docs/LAB_NOTES.example.md LAB_NOTES.md
 ```
 
-The resulting file is gitignored.
-
-### List connected USB serial ports
-
-```bash
-ls /dev/tty.usbmodem*
-ls /dev/cu.usbmodem*
-```
-
-- Shows currently connected USB CDC devices (STM32 USB CDC, ESP32 USB-Serial/JTAG, etc.).
-- On macOS, `/dev/cu.*` is typically preferred for active terminal/monitor connections.
-
-### Attach ESP-IDF monitor without reflashing
+List USB ports with `ls /dev/cu.usbmodem*` on macOS, then set local shell variables
+for the connections you use:
 
 ```bash
-bash scripts/esp32.sh -p /dev/cu.usbmodemXXXX monitor
+# Direct STM32 USB
+bash scripts/run_dashboard.sh --source serial --serial-port "$UWB_TX_USB"
+
+# Two USB-connected boards, with radio controls
+bash scripts/run_dashboard.sh --source dual-serial \
+  --serial-port "$UWB_TX_USB" --responder-port "$UWB_RX_USB"
+
+# ESP32 bridge; use the address printed by its "Got IP" boot log
+bash scripts/run_dashboard.sh --source tcp --tcp-host "$UWB_BRIDGE_HOST"
 ```
 
-- Opens the serial monitor for an already flashed ESP32.
-- Useful to read logs such as `Got IP: ...` without writing new firmware.
+Hardware modes require explicit addresses/ports; there are no guessed device
+defaults. For an ESP32 monitor without flashing:
+`bash scripts/esp32.sh -p "$ESPPORT" monitor`. Quit that monitor with `Ctrl+]`.
+The bridge accepts one TCP client on port 3333 by default and is intended only
+for a trusted lab network.
 
-If multiple ESP-class devices are connected, always pass `-p` explicitly.
+## Documentation
 
-Optional convenience variable:
-
-```bash
-export ESPPORT=/dev/cu.usbmodemXXXX
-bash scripts/esp32.sh monitor
-```
-
-- Uses `ESPPORT` as the default monitor/flash port in ESP-IDF tooling.
-- The monitor prints `Got IP: ...` at boot. That is where the bridge address comes from; note it
-  in `LAB_NOTES.md` rather than here, since DHCP reassigns it.
-
-### Check TCP bridge reachability from your Mac
-
-```bash
-nc 192.168.x.xxx 3333
-```
-
-- Opens a raw TCP connection to the ESP32 bridge.
-- Expected first line on success:
-
-```text
-ESP32 UART->TCP bridge connected
-```
-
-- Data from STM32 UART should appear in this terminal while connected.
-
-### Run dashboard from serial source (direct STM32 USB)
-
-```bash
-bash scripts/run_dashboard.sh --source serial --serial-port /dev/tty.usbmodemXXXX
-```
-
-- Reads telemetry directly from STM32 USB CDC instead of ESP32 TCP.
-
-### Run dashboard from ESP32 TCP source
-
-```bash
-bash scripts/run_dashboard.sh --source tcp --tcp-host 192.168.x.xxx --tcp-port 3333
-```
-
-- Reads telemetry through the ESP32 UART-to-TCP bridge.
-
-### Useful monitor controls
-
-- `Ctrl+]`: quit `idf.py monitor`.
-- `Ctrl+C`: stop `nc` or most foreground terminal commands.
-
-For the documentation map, see [docs/README.md](docs/README.md); for progress, limitations,
-and the phased roadmap, see [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
+- [Host guide](host/README.md): dashboard workflows and recording layout.
+- [Documentation map](docs/README.md): architecture and scientific references.
+- [Current status](docs/IMPLEMENTATION_STATUS.md): working features, limits, next steps.

@@ -128,14 +128,13 @@ def test_analysis_worker_coalesces_pending_requests(tmp_path):
             AnalysisRequest(
                 batch_id=runner.status()["batch_id"],
                 methods=["statistics"],
-                window_size=10,
+                field="raw_m",
             )
         )
         third = service.submit(
             AnalysisRequest(
                 batch_id=runner.status()["batch_id"],
-                methods=["statistics"],
-                window_size=20,
+                methods=["histogram"],
             )
         )
         assert service.get(second["job_id"])["state"] == "superseded"
@@ -147,28 +146,36 @@ def test_analysis_worker_coalesces_pending_requests(tmp_path):
     asyncio.run(scenario())
 
 
-def test_window_count_does_not_claim_full_selection_size(tmp_path):
+def test_cumulative_and_saved_analysis_use_the_same_recorded_population(tmp_path):
     from uwb_lab.analysis import AnalysisRequest
     from uwb_lab.analysis_jobs import AnalysisService
 
     async def scenario():
         runner = archive(tmp_path)
-        service = AnalysisService(runner)
-        job = service.submit(
-            AnalysisRequest(
-                batch_id=runner.status()["batch_id"],
-                scope="batch",
-                mode="live",
-                window_size=10,
-                methods=["statistics"],
-            )
+        batch_id = runner.status()["batch_id"]
+        outputs = []
+        for mode in ("cumulative", "full"):
+            service = AnalysisService(runner)
+            job = service.submit(AnalysisRequest(batch_id=batch_id, mode=mode))
+            await service.close()
+            assert job["state"] == "succeeded", job
+            outputs.append(job["output"])
+        assert outputs[0]["results"] == outputs[1]["results"]
+        assert (
+            outputs[0]["excluded"]
+            == outputs[1]["excluded"]
+            == {
+                "invalid": 2,
+                "missing_prior": 0,
+                "nonfinite": 0,
+            }
         )
-        await service.close()
-        output = service.get(job["job_id"])["output"]
-        metrics = {item["key"]: item["value"] for item in output["results"][0]["result"]["metrics"]}
-        assert output["included_count"] == 10
+        assert outputs[0]["provenance"]["source_sha256"] == outputs[1]["provenance"]["source_sha256"]
+        assert outputs[0]["included_count"] == outputs[1]["included_count"] == 78
+        assert all("window_size" not in output for output in outputs)
+        metrics = {item["key"]: item["value"] for item in outputs[0]["results"][0]["result"]["metrics"]}
         assert metrics["count"] == 78
-        assert metrics["window_count"] == 10
+        assert set(metrics) == {"count", "bias_m", "std_m", "rmse_m", "p95_abs_m"}
 
     asyncio.run(scenario())
 
@@ -200,7 +207,7 @@ def test_cumulative_analysis_fits_every_sample_not_run_means_or_a_window(tmp_pat
         assert result["state"] == "succeeded", result
         output = result["output"]
         assert output["included_count"] == 3200
-        assert output["window_size"] is None
+        assert "window_size" not in output
         results = {item["method"]: item["result"] for item in output["results"]}
         metrics = {item["key"]: item["value"] for item in results["statistics"]["metrics"]}
         assert metrics["count"] == 3200
@@ -244,8 +251,7 @@ def test_cumulative_live_snapshot_includes_older_samples_but_not_later_appends(t
                 "expected_m": 2.0,
                 "valid": True,
             }
-            run_id = runner.record_sample(sample)
-            service.observe(batch_id, run_id, sample)
+            runner.record_sample(sample)
         started, release = threading.Event(), threading.Event()
         compute = service.compute
 

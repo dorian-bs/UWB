@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import time
@@ -98,9 +99,7 @@ class Runtime:
             self.sample_rate.add(received_at)
         try:
             if self.experiments.active:
-                run_id = self.experiments.record_sample(sample)
-                if run_id is not None:
-                    self.analysis.observe(self.experiments.status()["batch_id"], run_id, sample)
+                self.experiments.record_sample(sample)
             else:
                 self.recorder.record_sample(sample)
         except OSError as error:
@@ -152,7 +151,7 @@ async def demo_source() -> AsyncIterator[str]:
     while True:
         sequence += 1
         elapsed = time.monotonic() - started
-        true_distance = 2.0 + 0.25 * __import__("math").sin(elapsed / 8)
+        true_distance = 2.0 + 0.25 * math.sin(elapsed / 8)
         measured = true_distance + random.gauss(0, 0.025)
         message = {
             "type": "range",
@@ -170,7 +169,9 @@ async def demo_source() -> AsyncIterator[str]:
 
 
 async def tcp_source() -> AsyncIterator[str]:
-    host = os.getenv("UWB_TCP_HOST", "192.168.1.10")
+    host = os.getenv("UWB_TCP_HOST")
+    if not host:
+        raise ValueError("TCP source requires --tcp-host or UWB_TCP_HOST")
     port = int(os.getenv("UWB_TCP_PORT", "3333"))
     while True:
         try:
@@ -191,7 +192,9 @@ async def tcp_source() -> AsyncIterator[str]:
 async def serial_source() -> AsyncIterator[str]:
     import serial
 
-    port = os.getenv("UWB_SERIAL_PORT", "/dev/tty.usbmodem1")
+    port = os.getenv("UWB_SERIAL_PORT")
+    if not port:
+        raise ValueError("Serial source requires --serial-port or UWB_SERIAL_PORT")
     baud = int(os.getenv("UWB_SERIAL_BAUD", "115200"))
     while True:
         try:
