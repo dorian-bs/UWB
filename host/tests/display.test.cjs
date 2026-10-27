@@ -188,3 +188,10 @@ test("pause freezes data through arrivals and snapshots; resume shows latest dat
   state.snapshot(Array.from({ length: 30 }, (_, seq) => ({ seq })));
   assert.equal(state.visible(100).length, 20);
 });
+
+test("dashboard markup includes antenna-delay calibration assistant panel", () => {
+  const html = fs.readFileSync(require.resolve("../uwb_lab/static/index.html"), "utf8");
+  assert.match(html, /Antenna-delay calibration assistant/);
+  assert.match(html, /id="calibration-panel"/);
+  assert.match(html, /id="calibration-form"/);
+});

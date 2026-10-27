@@ -247,6 +247,47 @@
         </form>
         </details>
       </section>
+      <section>
+        <details id="calibration-panel" class="control-panel">
+          <summary>
+            <h2>Antenna-delay calibration assistant</h2>
+            <span id="calibration-state" role="status">Idle</span>
+          </summary>
+          <form id="calibration-form">
+            <label>Known distance (m)
+              <input id="calibration-known-distance" name="known_distance_m" type="number" min="0.001" step="0.001" value="2.000" required>
+            </label>
+            <label>Target samples
+              <input id="calibration-target-samples" name="target_samples" type="number" min="2" max="10000" step="1" value="100" required>
+            </label>
+            <label>Tolerance (m)
+              <input id="calibration-tolerance" name="tolerance_m" type="number" min="0" step="0.001" value="0.010" required>
+            </label>
+            <label>DTU per cm (hint)
+              <input id="calibration-dtu-per-cm" name="dtu_per_cm" type="number" min="0" step="1" value="0" inputmode="numeric">
+            </label>
+            <div class="calibration-actions">
+              <button id="calibration-start" type="submit">Start capture</button>
+              <button id="calibration-stop" type="button">Stop capture</button>
+              <button id="calibration-reset" type="button">Reset</button>
+            </div>
+          </form>
+          <dl class="calibration-stats">
+            <div><dt>Captured</dt><dd id="calibration-captured">0</dd></div>
+            <div><dt>Skipped</dt><dd id="calibration-skipped">0</dd></div>
+            <div><dt>Corrected mean (m)</dt><dd id="calibration-corrected-mean">--</dd></div>
+            <div><dt>Corrected std (m)</dt><dd id="calibration-corrected-std">--</dd></div>
+            <div><dt>Corrected min/max (m)</dt><dd id="calibration-corrected-range">-- / --</dd></div>
+            <div><dt>Raw mean (m)</dt><dd id="calibration-raw-mean">--</dd></div>
+            <div><dt>Raw std (m)</dt><dd id="calibration-raw-std">--</dd></div>
+            <div><dt>Raw min/max (m)</dt><dd id="calibration-raw-range">-- / --</dd></div>
+            <div><dt>Error (m)</dt><dd id="calibration-error-m">--</dd></div>
+          </dl>
+          <p id="calibration-recommendation" class="calibration-note" role="status">Start capture to compute a recommendation.</p>
+          <p class="calibration-note">Recommendation only: apply antenna-delay changes manually on both boards.</p>
+          <p id="calibration-error" class="error" role="alert" hidden></p>
+        </details>
+      </section>
 
       <section>
         <div class="section-title">

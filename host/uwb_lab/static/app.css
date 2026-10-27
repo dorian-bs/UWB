@@ -75,6 +75,25 @@ canvas { display: block; width: 100%; height: var(--plot-height, 300px); backgro
 .control-panel > summary h2 { display: inline; }
 .control-panel > summary span { margin-left: 8px; font: 11px ui-monospace, monospace; color: var(--muted); }
 .control-panel[open] > summary { margin-bottom: 8px; }
+.calibration-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.calibration-actions button { flex: 1 1 120px; }
+.calibration-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.calibration-stats div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f5f8f6;
+}
+.calibration-stats dt { font-size: 11px; line-height: 1.35; }
+.calibration-stats dd { font-size: 12px; }
+.calibration-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
 .section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
 .section-title span { font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
 form { display: grid; gap: 8px; }
