@@ -38,7 +38,30 @@ test("calibration summary reports not-enough-data for fewer than 2 corrected sam
   api.calibrationConsumeSample(state, { valid: true, corrected_m: 2.02, raw_m: 2.04 });
   const summary = api.calibrationSummary(state);
   assert.equal(summary.ready, false);
-  assert.match(summary.message, /not enough data/i);
+  assert.equal(summary.message, "Not enough data: captured 1 valid corrected sample(s); need at least 2.");
+});
+
+test("calibration summary recommendation text is explicit for increase/decrease/none", () => {
+  const increaseState = api.createCalibrationState();
+  api.calibrationStart(increaseState, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
+  api.calibrationConsumeSample(increaseState, { valid: true, corrected_m: 2.03, raw_m: 2.05 });
+  api.calibrationConsumeSample(increaseState, { valid: true, corrected_m: 2.04, raw_m: 2.06 });
+  const increase = api.calibrationSummary(increaseState);
+  assert.equal(increase.message, "Recommendation: increase TX/RX antenna delays equally on both boards.");
+
+  const decreaseState = api.createCalibrationState();
+  api.calibrationStart(decreaseState, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
+  api.calibrationConsumeSample(decreaseState, { valid: true, corrected_m: 1.96, raw_m: 1.98 });
+  api.calibrationConsumeSample(decreaseState, { valid: true, corrected_m: 1.97, raw_m: 1.99 });
+  const decrease = api.calibrationSummary(decreaseState);
+  assert.equal(decrease.message, "Recommendation: decrease TX/RX antenna delays equally on both boards.");
+
+  const noneState = api.createCalibrationState();
+  api.calibrationStart(noneState, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
+  api.calibrationConsumeSample(noneState, { valid: true, corrected_m: 2.004, raw_m: 2.005 });
+  api.calibrationConsumeSample(noneState, { valid: true, corrected_m: 2.006, raw_m: 2.007 });
+  const none = api.calibrationSummary(noneState);
+  assert.equal(none.message, "Within tolerance (±0.010 m); no antenna-delay change suggested.");
 });
 
 test("radio form converts units and validates raw TX power without silent coercion", () => {

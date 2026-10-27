@@ -136,17 +136,17 @@ function calibrationDirection({ errorM, toleranceM }) {
 function calibrationSummary(state) {
   const summarize = (values) => {
     const count = values.length;
-    if (!count) return { count: 0, mean: Number.NaN, std: Number.NaN };
+    if (!count) return { count: 0, mean: Number.NaN, std: Number.NaN, min: Number.NaN, max: Number.NaN };
     const mean = values.reduce((sum, value) => sum + value, 0) / count;
     const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / count;
-    return { count, mean, std: Math.sqrt(variance) };
+    return { count, mean, std: Math.sqrt(variance), min: Math.min(...values), max: Math.max(...values) };
   };
   const corrected = summarize(state?.corrected ?? []);
   const raw = summarize(state?.raw ?? []);
   if (corrected.count < 2) {
     return {
       ready: false,
-      message: "Not enough data to calibrate yet; capture at least 2 valid corrected samples.",
+      message: `Not enough data: captured ${corrected.count} valid corrected sample(s); need at least 2.`,
       direction: "none",
       errorM: Number.NaN,
       corrected,
@@ -158,13 +158,34 @@ function calibrationSummary(state) {
   return {
     ready: true,
     message: direction === "none"
-      ? "Calibration is within tolerance."
-      : `Recommendation: ${direction} antenna delay.`,
+      ? `Within tolerance (±${state.toleranceM.toFixed(3)} m); no antenna-delay change suggested.`
+      : `Recommendation: ${direction} TX/RX antenna delays equally on both boards.`,
     direction,
     errorM,
     corrected,
     raw,
   };
+}
+
+function calibrationInputs(fields) {
+  const knownDistanceM = Number(fields.known_distance_m);
+  const targetSamples = Number(fields.target_samples);
+  const toleranceM = Number(fields.tolerance_m);
+  const dtuPerCmRaw = String(fields.dtu_per_cm ?? "").trim();
+  const dtuPerCm = dtuPerCmRaw === "" ? 0 : Number(dtuPerCmRaw);
+  if (!Number.isFinite(knownDistanceM) || knownDistanceM <= 0) {
+    throw new Error("Known distance must be a positive finite value in meters.");
+  }
+  if (!Number.isInteger(targetSamples) || targetSamples < 2) {
+    throw new Error("Target samples must be an integer greater than or equal to 2.");
+  }
+  if (!Number.isFinite(toleranceM) || toleranceM < 0) {
+    throw new Error("Tolerance must be a finite value greater than or equal to 0.");
+  }
+  if (!Number.isFinite(dtuPerCm) || dtuPerCm < 0) {
+    throw new Error("DTU-per-cm hint must be blank or a finite value greater than or equal to 0.");
+  }
+  return { knownDistanceM, targetSamples, toleranceM, dtuPerCm };
 }
 
 function radioPayload(fields) {
@@ -200,6 +221,8 @@ function startDashboard() {
   let streamOpen = false;
   let radioInitialized = false;
   let radioSubmitting = false;
+  let calibrationDtuPerCm = 0;
+  const calibration = createCalibrationState();
   const showError = (id, message) => {
     byId(id).textContent = message;
     byId(id).hidden = !message;
@@ -270,6 +293,41 @@ function startDashboard() {
       savePreferences();
       drawAll();
     } catch (error) { showError(`${prefix}plot-error`, error.message); }
+  }
+  const formatCalibrationValue = (value) => Number.isFinite(value) ? value.toFixed(4) : "--";
+  const formatCalibrationRange = (stats) => Number.isFinite(stats.min) && Number.isFinite(stats.max)
+    ? `${stats.min.toFixed(4)} / ${stats.max.toFixed(4)}`
+    : "-- / --";
+  function recommendationText(summary) {
+    if (!summary.ready) return summary.message;
+    if (!Number.isFinite(calibrationDtuPerCm) || calibrationDtuPerCm <= 0 || summary.direction === "none") {
+      return summary.message;
+    }
+    const cm = Math.abs(summary.errorM) * 100;
+    const dtu = Math.round(cm * calibrationDtuPerCm);
+    return `${summary.message} Estimated offset: ${cm.toFixed(2)} cm (${dtu} DTU at ${calibrationDtuPerCm} DTU/cm).`;
+  }
+  function renderCalibration(statusNote = "") {
+    const summary = calibrationSummary(calibration);
+    byId("calibration-captured").textContent = String(calibration.captured);
+    byId("calibration-skipped").textContent = String(calibration.skipped);
+    byId("calibration-corrected-mean").textContent = formatCalibrationValue(summary.corrected.mean);
+    byId("calibration-corrected-std").textContent = formatCalibrationValue(summary.corrected.std);
+    byId("calibration-corrected-range").textContent = formatCalibrationRange(summary.corrected);
+    byId("calibration-raw-mean").textContent = formatCalibrationValue(summary.raw.mean);
+    byId("calibration-raw-std").textContent = formatCalibrationValue(summary.raw.std);
+    byId("calibration-raw-range").textContent = formatCalibrationRange(summary.raw);
+    byId("calibration-error-m").textContent = formatCalibrationValue(summary.errorM);
+    byId("calibration-start").disabled = calibration.running;
+    byId("calibration-stop").disabled = !calibration.running;
+    byId("calibration-state").textContent = calibration.running
+      ? `Capturing ${calibration.captured}/${calibration.targetSamples}`
+      : calibration.captured || calibration.skipped ? "Stopped" : "Idle";
+    byId("calibration-recommendation").textContent = statusNote || (
+      calibration.captured || calibration.skipped || calibration.running
+        ? recommendationText(summary)
+        : "Start capture to compute a recommendation."
+    );
   }
 
   function drawChart(canvas, samples, settings) {
@@ -369,6 +427,7 @@ function startDashboard() {
     byId("pause-view").setAttribute("aria-pressed", String(view.paused()));
     byId("window-label").textContent = `${samples.length} / ${preferences.count} samples`;
     byId("window-label").title = `${view.buffered()} / 2000 buffered. Rolling statistics use the host's last 20 residuals.`;
+    renderCalibration();
   }
 
   async function request(path, options = {}) {
@@ -444,7 +503,16 @@ function startDashboard() {
       try {
         const message = JSON.parse(event.data);
         if (message.type === "snapshot") view.snapshot(message.samples);
-        else if (message.type === "sample") view.add(message.sample);
+        else if (message.type === "sample") {
+          view.add(message.sample);
+          if (calibration.running) {
+            calibrationConsumeSample(calibration, message.sample);
+            if (calibration.captured >= calibration.targetSamples) {
+              calibration.running = false;
+              renderCalibration("Capture target reached. Review stats and recommendation below.");
+            }
+          }
+        }
         drawAll();
       } catch (error) { showError("display-warning", `Stream message could not be displayed: ${error.message}`); }
     };
@@ -506,6 +574,29 @@ function startDashboard() {
       await refreshStatus();
     } catch (error) { showError("recording-error", error.message); }
   });
+  byId("calibration-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    showError("calibration-error", "");
+    try {
+      const fields = calibrationInputs(Object.fromEntries(new FormData(event.target)));
+      calibrationDtuPerCm = fields.dtuPerCm;
+      calibrationStart(calibration, fields);
+      renderCalibration("Capture started: collecting valid corrected samples from incoming telemetry.");
+    } catch (error) {
+      showError("calibration-error", error.message);
+      renderCalibration();
+    }
+  });
+  byId("calibration-stop").addEventListener("click", () => {
+    calibration.running = false;
+    renderCalibration();
+  });
+  byId("calibration-reset").addEventListener("click", () => {
+    Object.assign(calibration, createCalibrationState());
+    calibrationDtuPerCm = 0;
+    showError("calibration-error", "");
+    renderCalibration();
+  });
   byId("radio-refresh").addEventListener("click", async () => {
     try {
       const status = await request("/api/status");
@@ -534,12 +625,12 @@ function startDashboard() {
     }
   });
   window.addEventListener("resize", drawAll);
-  syncControls(); drawAll(); connect(); refreshStatus();
+  syncControls(); drawAll(); renderCalibration(); connect(); refreshStatus();
   setInterval(refreshStatus, 1000);
 }
 
 if (typeof module !== "undefined") module.exports = {
   DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
-  createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
+  createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection, calibrationInputs,
 };
 if (typeof document !== "undefined") startDashboard();
