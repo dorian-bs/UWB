@@ -26,6 +26,7 @@
         <div class="section-title"><h2>Experiment batch</h2><span id="experiment-state" role="status">No batch started</span></div>
         <progress id="experiment-progress" max="1" value="0" aria-label="Completed experiment runs"></progress>
         <p id="experiment-timing" class="plot-note">Configure a prior, then start a repeated experiment. Closing the browser does not stop a batch.</p>
+        <button id="experiment-next" type="button" hidden>Start next run</button>
         <button id="experiment-stop" class="stop" type="button" disabled>Stop batch</button>
         <p id="experiment-error" class="error" role="alert" hidden></p>
       </section>
@@ -138,7 +139,8 @@
 
     <aside id="experiment-controls" class="controls">
       <section>
-        <h2>Experiment setup</h2>
+        <details id="experiment-panel" class="control-panel" open>
+        <summary><h2>Experiment setup</h2></summary>
         <form id="experiment-form">
           <fieldset id="experiment-fields" class="form-fields">
             <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
@@ -147,15 +149,19 @@
               <label>Runs<input name="run_count" type="number" min="1" step="1" value="5" required></label>
             </div>
             <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="0.5" required></label>
+            <label>Start delay before each batch/run (s)<input name="start_delay_s" type="number" min="0" step="any" value="0" required></label>
+            <label class="check"><input name="manual_start" type="checkbox"> Start each run manually (interval ignored)</label>
             <label>Notes<input name="notes" maxlength="200"></label>
           </fieldset>
           <p id="experiment-prior" class="plot-note">Set a distance or position prior in Geometry prior below.</p>
           <p class="plot-note">Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.</p>
           <button id="experiment-start" type="submit">Start batch</button>
         </form>
+        </details>
       </section>
       <section>
-        <h2>Analysis setup</h2>
+        <details id="analysis-panel" class="control-panel" open>
+        <summary><h2>Analysis setup</h2></summary>
         <div id="analysis-settings" class="form-fields">
           <label>Residual source<select name="field"><option value="corrected_m">Corrected - expected</option><option value="raw_m">Raw - expected</option></select></label>
           <div id="analysis-methods" class="form-fields"></div>
@@ -169,6 +175,7 @@
           <button id="analysis-full" type="button">Recompute full closed dataset</button>
           <p id="analysis-error" class="error" role="alert" hidden></p>
         </div>
+        </details>
       </section>
       <section aria-label="Physical radio configuration">
         <details id="radio-panel" class="control-panel">
@@ -290,10 +297,8 @@
       </section>
 
       <section>
-        <div class="section-title">
-          <h2>Recording</h2>
-          <span id="recording-state">Stopped</span>
-        </div>
+        <details id="recording-panel" class="control-panel" open>
+        <summary><h2>Recording</h2><span id="recording-state">Stopped</span></summary>
         <form id="recording-form" class="recording-form">
           <label>Session name
             <input name="name" maxlength="80" value="experiment">
@@ -301,6 +306,7 @@
           <button id="record-button" type="submit">Start recording</button>
           <p id="recording-error" class="error" role="alert" hidden></p>
         </form>
+        </details>
       </section>
 
     </aside>

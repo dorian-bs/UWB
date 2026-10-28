@@ -459,6 +459,18 @@ async def start_experiment(payload: BatchInput) -> dict[str, Any]:
         return result
 
 
+@app.post("/api/experiments/next")
+async def start_next_run() -> dict[str, Any]:
+    async with runtime.controls(batch=True):
+        try:
+            return runtime.experiments.begin_waiting_run()
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except OSError as error:
+            logger.exception("Cannot start run")
+            raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 @app.post("/api/experiments/stop")
 async def stop_experiment() -> dict[str, Any]:
     async with runtime.controls(batch=True):

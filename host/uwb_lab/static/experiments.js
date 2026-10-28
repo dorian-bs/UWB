@@ -13,6 +13,8 @@ function experimentPayload(fields) {
     duration_s: numeric("duration_s", false, 0, false),
     run_count: numeric("run_count", true, 1),
     interval_s: numeric("interval_s", false, 0),
+    start_delay_s: numeric("start_delay_s", false, 0),
+    manual_start: fields.manual_start === true || fields.manual_start === "on",
   };
 }
 
@@ -34,6 +36,12 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
     } catch (error) { showError("experiment-error", error.message); }
     finally { submitting = false; await refreshStatus(); }
   });
+  byId("experiment-next").addEventListener("click", async () => {
+    byId("experiment-next").disabled = true;
+    try { await request("/api/experiments/next", {method: "POST"}); }
+    catch (error) { showError("experiment-error", error.message); }
+    finally { await refreshStatus(); }
+  });
   byId("experiment-stop").addEventListener("click", async () => {
     byId("experiment-stop").disabled = true;
     try { await request("/api/experiments/stop", {method: "POST"}); }
@@ -48,6 +56,10 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
       byId("experiment-start").disabled = locked || submitting || status.recording ||
         !status.connected || !status.prior || status.radio?.busy === true;
       byId("experiment-stop").disabled = !locked;
+      const waiting = locked && state.phase === "waiting";
+      byId("experiment-next").hidden = !waiting;
+      byId("experiment-next").disabled = !waiting;
+      if (waiting) byId("experiment-next").textContent = `Start run ${state.run_index}/${state.run_count}`;
       for (const form of ["prior-form", "recording-form"]) {
         byId(form).querySelectorAll("input,select,button").forEach((input) => { input.disabled = locked; });
       }
@@ -58,7 +70,13 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
       byId("experiment-state").textContent = state.batch_id
         ? `${locked ? state.phase : state.outcome} - run ${state.run_index}/${state.run_count}`
         : "No batch started";
-      if (locked) {
+      if (locked && state.phase === "waiting") {
+        byId("experiment-timing").textContent =
+          `Waiting for you to start run ${state.run_index}/${state.run_count}. Move the setup, then press the button.`;
+      } else if (locked && state.phase === "delay") {
+        byId("experiment-timing").textContent =
+          `Run ${state.run_index} starts in ${formatAnalysisValue(state.remaining_s, "s")} s. Get clear of the setup.`;
+      } else if (locked) {
         byId("experiment-timing").textContent =
           `${formatAnalysisValue(state.elapsed_s, "s")} s elapsed; ${formatAnalysisValue(state.remaining_s, "s")} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host.`;
       } else if (state.batch_id) {
@@ -68,7 +86,9 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
       progress.max = state.run_count || 1;
       const fraction = state.elapsed_s / (state.elapsed_s + state.remaining_s || 1);
       progress.value = state.outcome === "completed" ? state.run_count :
-        state.phase === "interval" ? state.run_index : Math.max(0, state.run_index - 1 + (locked ? fraction : 0));
+        state.phase === "interval" ? state.run_index :
+          state.phase === "waiting" || state.phase === "delay" ? state.run_index - 1 :
+          Math.max(0, state.run_index - 1 + (locked ? fraction : 0));
       if (state.error) showError("experiment-error", state.error);
     },
   };

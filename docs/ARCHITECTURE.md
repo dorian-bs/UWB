@@ -94,7 +94,7 @@ Batches use `data/sessions/experiments/<batch-id>/`, with a manifest,
 `runs/<session-id>/` directories in the same format, `intervals.ndjson`,
 and `analyses/<result-id>.json`.
 Host monotonic deadlines drive scheduling, independent of browser lifetime.
-Prior/radio/manual-recording controls are locked during runs and intervals.
+Prior/radio/manual-recording controls are locked during runs and intervals. Batches accept `start_delay_s` (countdown before a run) and `manual_start` (each run waits in a `waiting` phase until `POST /api/experiments/next`); samples outside a run go to `intervals.ndjson` tagged with `phase`.
 Stop/disconnect/shutdown preserves incomplete outcomes; unfinished saved batches
 reopen as interrupted, without automatic resumption.
 

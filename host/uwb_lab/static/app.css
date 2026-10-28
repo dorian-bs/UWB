@@ -71,6 +71,7 @@ canvas { display: block; width: 100%; height: var(--plot-height, 300px); backgro
 .controls { padding: 10px; background: var(--panel); border: 1px solid var(--line); align-self: start; }
 .controls section + section { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .control-panel { margin-top: 0; }
+.check input { width: auto; }
 .control-panel > summary { color: var(--ink); }
 .control-panel > summary h2 { display: inline; }
 .control-panel > summary span { margin-left: 8px; font: 11px ui-monospace, monospace; color: var(--muted); }

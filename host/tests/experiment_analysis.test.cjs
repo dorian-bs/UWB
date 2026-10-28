@@ -8,9 +8,10 @@ const { resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisV
 test("experiment inputs preserve duration, integer repetitions and interval", () => {
   assert.deepEqual(experimentPayload({
     name: "LOS", notes: "", duration_s: "10", run_count: "3", interval_s: "2",
-  }), { name: "LOS", notes: "", duration_s: 10, run_count: 3, interval_s: 2 });
-  for (const fields of [{duration_s: ""}, {run_count: "1.5"}, {interval_s: "-1"}]) {
-    assert.throws(() => experimentPayload({name: "", duration_s: "10", run_count: "3", interval_s: "2", ...fields}));
+    start_delay_s: "3", manual_start: "on",
+  }), { name: "LOS", notes: "", duration_s: 10, run_count: 3, interval_s: 2, start_delay_s: 3, manual_start: true });
+  for (const fields of [{duration_s: ""}, {run_count: "1.5"}, {interval_s: "-1"}, {start_delay_s: "-1"}]) {
+    assert.throws(() => experimentPayload({name: "", duration_s: "10", run_count: "3", interval_s: "2", start_delay_s: "0", ...fields}));
   }
   assert.equal(experimentLocked({active: true, phase: "interval"}), true);
   assert.equal(experimentLocked({active: false}), false);

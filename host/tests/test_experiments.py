@@ -170,3 +170,49 @@ def test_failed_session_finalization_never_marks_run_completed(tmp_path, monkeyp
     assert batch["runs"][0]["session"] is not None
     assert batch["runs"][1]["state"] == "not_executed"
     assert not runner.recorder.active
+
+
+def test_start_delay_and_manual_runs(tmp_path):
+    from uwb_lab.experiments import BatchInput
+
+    runner, clock, prior = setup_runner(tmp_path)
+    runner.start(
+        BatchInput(duration_s=10, run_count=2, interval_s=0, start_delay_s=5, manual_start=True),
+        source="demo",
+        prior=prior,
+        radio_snapshot=None,
+    )
+    assert runner.status()["phase"] == "waiting"
+    clock[0] = 100
+    runner.record_sample(sample(1))
+    assert runner.status()["phase"] == "waiting"
+    runner.begin_waiting_run()
+    assert runner.status()["phase"] == "delay"
+    clock[0] = 104
+    runner.advance()
+    assert runner.status()["phase"] == "delay"
+    clock[0] = 105
+    runner.record_sample(sample(2))
+    assert runner.status()["phase"] == "recording"
+    clock[0] = 115
+    runner.record_sample(sample(3))
+    status = runner.status()
+    assert (status["phase"], status["run_index"]) == ("waiting", 2)
+    runner.stop("stopped", "test")
+
+
+def test_start_delay_automatic(tmp_path):
+    from uwb_lab.experiments import BatchInput
+
+    runner, clock, prior = setup_runner(tmp_path)
+    runner.start(
+        BatchInput(duration_s=10, run_count=1, start_delay_s=5),
+        source="demo",
+        prior=prior,
+        radio_snapshot=None,
+    )
+    assert runner.status()["phase"] == "delay"
+    clock[0] = 5
+    runner.advance()
+    assert runner.status()["phase"] == "recording"
+    runner.stop("stopped", "test")

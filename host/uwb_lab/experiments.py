@@ -27,6 +27,8 @@ class BatchInput(BaseModel):
     duration_s: float = Field(default=300, gt=0)
     run_count: int = Field(default=3, ge=1, strict=True)
     interval_s: float = Field(default=10, ge=0)
+    start_delay_s: float = Field(default=0, ge=0)
+    manual_start: bool = False
 
 
 class BatchRunner:
@@ -92,10 +94,39 @@ class BatchRunner:
         try:
             self.intervals = (self.directory / "intervals.ndjson").open("a", encoding="utf-8")
             self._persist()
-            self._open_run()
+            self._begin_run()
         except OSError as error:
             self.stop("failed", f"Recording startup failed: {error}")
             raise
+        return self.status()
+
+    def _begin_run(self) -> None:
+        """Enter the waiting phase (manual mode), the start-delay countdown, or record immediately."""
+        assert self.meta is not None
+        config = self.meta["config"]
+        self.phase_started = self.clock()
+        if config["manual_start"]:
+            self.phase = "waiting"
+            self.deadline = self.phase_started
+            self._persist()
+        elif config["start_delay_s"] > 0:
+            self.phase = "delay"
+            self.deadline = self.phase_started + config["start_delay_s"]
+            self._persist()
+        else:
+            self._open_run()
+
+    def begin_waiting_run(self) -> dict[str, Any]:
+        if not self.active or self.phase != "waiting":
+            raise ValueError("No run is waiting to be started")
+        assert self.meta is not None
+        if self.meta["config"]["start_delay_s"] > 0:
+            self.phase_started = self.clock()
+            self.phase = "delay"
+            self.deadline = self.phase_started + self.meta["config"]["start_delay_s"]
+            self._persist()
+        else:
+            self._open_run()
         return self.status()
 
     def _open_run(self) -> None:
@@ -160,10 +191,12 @@ class BatchRunner:
         if self.pending_stop is not None:
             self.stop(*self.pending_stop)
             return
-        if self.clock() < self.deadline:
+        if self.phase == "waiting" or self.clock() < self.deadline:
             return
         assert self.meta is not None
-        if self.phase == "recording":
+        if self.phase == "delay":
+            self._open_run()
+        elif self.phase == "recording":
             if not self.moments["corrected_m"].count:
                 self.stop("failed", "No valid measurements in the run")
                 return
@@ -171,28 +204,32 @@ class BatchRunner:
             if self.index + 1 == len(self.meta["runs"]):
                 self.stop("completed", None)
                 return
-            self.phase = "interval"
             self.phase_started = self.clock()
-            self.deadline = self.phase_started + self.meta["config"]["interval_s"]
+            if self.meta["config"]["manual_start"]:
+                self.index += 1
+                self.phase = "waiting"
+                self.deadline = self.phase_started
+            else:
+                self.phase = "interval"
+                self.deadline = self.phase_started + self.meta["config"]["interval_s"]
             self._persist()
-        if self.phase == "interval" and self.clock() >= self.deadline:
+            self.advance()
+        elif self.phase == "interval":
             self.index += 1
-            self._open_run()
+            self.phase = "idle"
+            self._begin_run()
 
     def record_sample(self, sample: dict[str, Any]) -> str | None:
         self.advance()
         if not self.active:
             return None
         assert self.meta is not None
-        if self.phase == "interval":
+        if self.phase != "recording":
             assert self.intervals is not None
+            run_key = "after_run" if self.phase == "interval" else "before_run"
             self.intervals.write(
                 json.dumps(
-                    {
-                        "phase": "interval",
-                        "after_run": self.meta["runs"][self.index]["run_id"],
-                        "sample": sample,
-                    },
+                    {"phase": self.phase, run_key: self.meta["runs"][self.index]["run_id"], "sample": sample},
                     allow_nan=False,
                 )
                 + "\n"
