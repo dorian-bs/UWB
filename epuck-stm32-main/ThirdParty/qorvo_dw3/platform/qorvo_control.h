@@ -12,6 +12,9 @@ typedef struct {
     uint32_t preamble;
     uint32_t data_rate;
     uint32_t tx_power;
+    /* Absolute DW register values, each limited to 0..65535. */
+    uint32_t tx_ant_dly;
+    uint32_t rx_ant_dly;
     bool running;
 } qorvo_radio_state_t;
 

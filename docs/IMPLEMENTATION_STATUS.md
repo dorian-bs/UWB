@@ -1,6 +1,6 @@
 # Implementation Status
 
-Updated **2026-10-27**. This is a student research tool, not a production platform.
+Updated **2026-10-28**. This is a student research tool, not a production platform.
 The useful workflow is connect, check a prior, record repeatable runs, and inspect
 the noise before adding more models.
 
@@ -16,7 +16,7 @@ the noise before adding more models.
 | Radio | Coordinated dual-USB rate/channel/preamble/data-rate/TX-power changes, readback and rollback |
 | Experiments | Host-scheduled repeated timed runs and intervals; separate recordings and incomplete/interrupted outcomes |
 | Analysis | Five core residual statistics, histogram/Gaussian, Welch or gap-aware Lomb-Scargle spectrum, seeded GMM |
-| Calibration | Browser-local fixed-LOS antenna-delay suggestions; firmware changes remain manual |
+| Calibration | Host-verified dual-USB fixed-LOS capture, evaluated antenna-delay preview/apply, readback/rollback and saved audit; runtime-only |
 | Development | Hardware-free Python/API, Node UI, and native C harness tests; thin setup/build/flash wrappers |
 
 Batch analysis uses all eligible individual recorded samples, not run averages
@@ -59,8 +59,10 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   Replay uses the current prior; archived batch analysis uses recorded expected values.
 - Automatic repetitions do not reset physical conditions or establish independent
   experiments. Moving priors, condition sweeps, labels, and model evaluation are not implemented.
-- Calibration capture is browser-local and suggestion-only; verify manual firmware
-  adjustments on a fresh physical LOS run.
+- Calibration apply requires a one-time firmware update on both STM32 boards.
+  Settings reset on board restart; no flash/OTP persistence. Other sources remain
+  suggestion-only. Validate the updated pair on fresh LOS runs and other distances.
+  Native/virtual-USB tests do not establish on-hardware ranging accuracy.
 - ESP32 accepts one unauthenticated TCP client on a trusted lab network. Keep
   credentials and local connection details in ignored configuration/notes.
 - The test environment currently emits an upstream Starlette/httpx deprecation

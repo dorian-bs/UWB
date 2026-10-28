@@ -69,6 +69,8 @@ class BoardState(BaseModel):
     data_rate: Literal[850, 6800]
     tx_power: int = Field(ge=0, le=0xFFFFFFFF)
     running: bool
+    tx_ant_dly: int | None = Field(default=None, ge=0, le=65535)
+    rx_ant_dly: int | None = Field(default=None, ge=0, le=65535)
 
 
 class ControlReply(BoardState):
@@ -102,6 +104,7 @@ class SerialBoard:
         self.lock = asyncio.Lock()
         self.next_id = secrets.randbelow(0x7FFFFFFF) + 1
         self.telemetry_dropped = 0
+        self.connection_id: str | None = None
 
     def status(self) -> dict[str, Any]:
         return {
@@ -109,6 +112,7 @@ class SerialBoard:
             "state": self.snapshot,
             "error": self.error,
             "telemetry_dropped": self.telemetry_dropped,
+            "connection_id": self.connection_id,
         }
 
     def handle_line(self, line: str) -> bool:
@@ -235,6 +239,7 @@ class SerialBoard:
                     serial.Serial, self.port, baudrate=115200, timeout=0.1, write_timeout=1, exclusive=True
                 )
                 self.connected = True
+                self.connection_id = secrets.token_hex(16)
                 self.error = None
                 reader = asyncio.create_task(self._read(ingest))
                 await self.command("GET")
@@ -260,6 +265,15 @@ class SerialBoard:
 
 
 DEVICE_FIELDS = ("period_ms", "channel", "preamble", "data_rate", "tx_power")
+DELAY_FIELDS = ("tx_ant_dly", "rx_ant_dly")
+
+
+def state_fields(state: dict[str, Any]) -> tuple[str, ...]:
+    return (
+        DEVICE_FIELDS + DELAY_FIELDS
+        if all(state.get(key) is not None for key in DELAY_FIELDS)
+        else DEVICE_FIELDS
+    )
 
 
 class RadioControl:
@@ -323,7 +337,7 @@ class RadioControl:
         actual = await self._query()
         for role, state in actual.items():
             if state["running"] or any(
-                state[key] != expected[role][key] for key in (*DEVICE_FIELDS, "revision")
+                state.get(key) != expected[role][key] for key in (*state_fields(expected[role]), "revision")
             ):
                 raise ControlError(f"{role}: configuration readback mismatch")
 
@@ -332,7 +346,7 @@ class RadioControl:
         for role in ("rx", "tx"):
             state = await self.boards[role].command("RESUME")
             if not state["running"] or any(
-                state[key] != expected[role][key] for key in (*DEVICE_FIELDS, "revision")
+                state.get(key) != expected[role][key] for key in (*state_fields(expected[role]), "revision")
             ):
                 raise ControlError(f"{role}: resume readback mismatch")
 
@@ -346,10 +360,10 @@ class RadioControl:
                 if state["running"]:
                     raise ControlError("pause rejected")
                 target = previous[role] | {"revision": revision}
-                await board.command("SET", revision, *(target[key] for key in DEVICE_FIELDS))
+                await board.command("SET", revision, *(target[key] for key in state_fields(target)))
                 actual = await board.command("GET")
                 if actual["running"] or any(
-                    actual[key] != target[key] for key in (*DEVICE_FIELDS, "revision")
+                    actual.get(key) != target[key] for key in (*state_fields(target), "revision")
                 ):
                     raise ControlError("rollback readback mismatch")
                 restored[role] = target
@@ -377,6 +391,20 @@ class RadioControl:
         return "rollback failed; reachable boards left paused; " + "; ".join(errors)
 
     async def apply(self, config: RadioConfig) -> dict[str, Any]:
+        return await self._apply(config)
+
+    async def apply_calibration(self, delta_dtu: int, baseline: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        if type(delta_dtu) is not int or delta_dtu == 0:
+            raise ControlError("Calibration adjustment must be a nonzero integer")
+        return await self._apply(None, delta_dtu=delta_dtu, baseline=baseline)
+
+    async def _apply(
+        self,
+        config: RadioConfig | None,
+        *,
+        delta_dtu: int = 0,
+        baseline: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         if self.busy:
             raise ControlError("Another radio operation is in progress")
         async with self.lock:
@@ -386,19 +414,37 @@ class RadioControl:
             changing = False
             try:
                 previous = await self._query()
+                if baseline is not None:
+                    if previous != baseline:
+                        raise ControlError("Board settings changed; capture a new calibration")
+                    if not all(state["running"] for state in previous.values()) or not all(
+                        previous["tx"][key] == previous["rx"][key] for key in DEVICE_FIELDS
+                    ):
+                        raise ControlError("Both boards must be running with compatible settings")
+                expected = {}
+                for role, state in previous.items():
+                    target = dict(state)
+                    if config is not None:
+                        target.update(zip(DEVICE_FIELDS, config.device_values(), strict=True))
+                    else:
+                        for key in DELAY_FIELDS:
+                            if state.get(key) is None:
+                                raise ControlError("Calibration requires updated firmware on both boards")
+                            value = state[key] + delta_dtu
+                            if not 0 <= value <= 65535:
+                                raise ControlError("Proposed antenna delay is outside the 0-65535 range")
+                            target[key] = value
+                    expected[role] = target
                 revision = max(state["revision"] for state in previous.values()) + 1
                 if revision >= 0xFFFFFFFF:
                     raise ControlError("Radio revision exhausted; restart both boards")
                 self.record("before")
                 changing = True
                 await self._pause()
-                expected = {}
                 for role, board in self.boards.items():
-                    expected[role] = previous[role] | dict(
-                        zip(DEVICE_FIELDS, config.device_values(), strict=True)
-                    )
                     expected[role]["revision"] = revision
-                    await board.command("SET", revision, *config.device_values())
+                    target = expected[role]
+                    await board.command("SET", revision, *(target[key] for key in state_fields(target)))
                 await self._verify(expected)
                 await self._resume(expected)
                 self.last_error = None

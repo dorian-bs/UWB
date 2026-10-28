@@ -31,7 +31,8 @@ static bool valid(const qorvo_radio_state_t *s)
         (s->channel == 5 || s->channel == 9) &&
         (s->preamble == 64 || s->preamble == 128 || s->preamble == 256 ||
          s->preamble == 512 || s->preamble == 1024) &&
-        (s->data_rate == 850 || s->data_rate == 6800);
+        (s->data_rate == 850 || s->data_rate == 6800) &&
+        s->tx_ant_dly <= UINT16_MAX && s->rx_ant_dly <= UINT16_MAX;
 }
 
 static void acknowledge(uint32_t id, const char *error)
@@ -41,17 +42,19 @@ static void acknowledge(uint32_t id, const char *error)
         "{\"type\":\"control\",\"v\":1,\"id\":%" PRIu32 ",\"ok\":%s,"
         "\"board\":%u,\"role\":\"%s\",\"revision\":%" PRIu32 ","
         "\"period_ms\":%" PRIu32 ",\"channel\":%" PRIu32 ",\"preamble\":%" PRIu32 ","
-        "\"data_rate\":%" PRIu32 ",\"tx_power\":%" PRIu32 ",\"running\":%s%s%s%s}\n",
+        "\"data_rate\":%" PRIu32 ",\"tx_power\":%" PRIu32 ",\"running\":%s,"
+        "\"tx_ant_dly\":%" PRIu32 ",\"rx_ant_dly\":%" PRIu32 "%s%s%s}\n",
         id, error ? "false" : "true", board_id, rx_role ? "rx" : "tx",
         state.revision, state.period_ms, state.channel, state.preamble, state.data_rate,
         state.tx_power, state.running ? "true" : "false",
+        state.tx_ant_dly, state.rx_ant_dly,
         error ? ",\"error\":\"" : "", error ? error : "", error ? "\"" : "");
     response_len = n > 0 && (size_t)n < sizeof(response) ? (size_t)n : 0;
 }
 
 static void command(void)
 {
-    char *words[10];
+    char *words[12];
     size_t count = 0;
     char *p = line;
     uint32_t id = 0;
@@ -66,7 +69,7 @@ static void command(void)
     }
     if (count >= 2) (void)decimal(words[1], &id);
     if (overflow) error = "frame_overflow";
-    else if (bad_ascii || count < 3 || count > 9 || strcmp(words[0], "UWB") ||
+    else if (bad_ascii || count < 3 || count > 11 || strcmp(words[0], "UWB") ||
              !decimal(words[1], &id)) error = "invalid_command";
     else if (!strcmp(words[2], "GET") && count == 3) {
         /* Readback is performed for every ACK, including failures. */
@@ -79,14 +82,19 @@ static void command(void)
             if (qorvo_control_resume()) state.running = true;
             else error = "resume_failed";
         }
-    } else if (!strcmp(words[2], "SET") && count == 9) {
+    } else if (!strcmp(words[2], "SET") && (count == 9 || count == 11)) {
         qorvo_radio_state_t requested = state;
+        /* Legacy SET preserves the current hardware delays, not cached defaults. */
+        qorvo_control_read(&requested);
         if (!decimal(words[3], &requested.revision) ||
             !decimal(words[4], &requested.period_ms) ||
             !decimal(words[5], &requested.channel) ||
             !decimal(words[6], &requested.preamble) ||
             !decimal(words[7], &requested.data_rate) ||
-            !decimal(words[8], &requested.tx_power) || !valid(&requested))
+            !decimal(words[8], &requested.tx_power) ||
+            (count == 11 && (!decimal(words[9], &requested.tx_ant_dly) ||
+                             !decimal(words[10], &requested.rx_ant_dly))) ||
+            !valid(&requested))
             error = "invalid_config";
         else if (state.running) error = "must_pause";
         else if (!qorvo_control_apply(&requested)) {

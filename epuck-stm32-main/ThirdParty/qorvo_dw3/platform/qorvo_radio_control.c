@@ -21,10 +21,13 @@ void qorvo_radio_read(qorvo_radio_state_t *state)
     state->preamble = (fine + 1U) * 8U;
     state->data_rate = (dwt_read_reg(TX_FCTRL_ID) & TX_FCTRL_TXBR_BIT_MASK) ? 6800U : 850U;
     state->tx_power = dwt_read_reg(TX_POWER_ID);
+    state->tx_ant_dly = dwt_gettxantennadelay();
+    state->rx_ant_dly = dwt_getrxantennadelay();
 }
 
 bool qorvo_radio_apply(const qorvo_radio_state_t *requested)
 {
+    if (requested->tx_ant_dly > UINT16_MAX || requested->rx_ant_dly > UINT16_MAX) return false;
     dwt_config_t config;
     memset(&config, 0, sizeof(config));
     config.chan = (uint8_t)requested->channel;
@@ -48,9 +51,12 @@ bool qorvo_radio_apply(const qorvo_radio_state_t *requested)
     dwt_txconfig_t txrf = {.PGdly=pg_delay[requested->channel == 9],
                           .power=requested->tx_power, .PGcount=0};
     dwt_configuretxrf(&txrf);
+    dwt_settxantennadelay((uint16_t)requested->tx_ant_dly);
+    dwt_setrxantennadelay((uint16_t)requested->rx_ant_dly);
     qorvo_radio_capture_rf();
     qorvo_radio_state_t actual = {0};
     qorvo_radio_read(&actual);
     return actual.channel == requested->channel && actual.preamble == requested->preamble &&
-           actual.data_rate == requested->data_rate && actual.tx_power == requested->tx_power;
+           actual.data_rate == requested->data_rate && actual.tx_power == requested->tx_power &&
+           actual.tx_ant_dly == requested->tx_ant_dly && actual.rx_ant_dly == requested->rx_ant_dly;
 }

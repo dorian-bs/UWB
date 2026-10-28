@@ -648,10 +648,6 @@ bool qorvo_control_apply(const qorvo_radio_state_t *requested)
     bool ok = qorvo_radio_apply(requested);
     dwt_forcetrxoff();
     qorvo_clear_status_events();
-    if (ok) {
-        dwt_settxantennadelay(qorvo_get_tx_ant_dly());
-        dwt_setrxantennadelay(qorvo_get_rx_ant_dly());
-    }
     return ok;
 }
 

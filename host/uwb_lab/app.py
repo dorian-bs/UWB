@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from .analysis import METHODS, AnalysisRequest
 from .analysis_jobs import AnalysisService
+from .calibration import CalibrationApplyInput, CalibrationCapture, CalibrationInput
 from .core import LabState, SessionRecorder
 from .experiments import BatchInput, BatchRunner
 from .radio import ControlError, RadioConfig, RadioControl, SampleRate, SerialBoard
@@ -45,6 +46,7 @@ class Runtime:
         self.source = os.getenv("UWB_SOURCE", "demo")
         self.state = LabState()
         self.recorder = SessionRecorder(data_dir if data_dir is not None else DATA_DIR)
+        self.calibration = CalibrationCapture(self.recorder.root)
         self.experiments = BatchRunner(self.recorder.root, self.recorder, health_snapshot=self.health)
         self.analysis = AnalysisService(self.experiments)
         self.operation_lock = asyncio.Lock()
@@ -82,11 +84,16 @@ class Runtime:
     def set_connected(self, connected: bool, reason: str | None = None) -> None:
         self.connected = connected
         if not connected:
+            self.calibration.invalidate(reason or "Acquisition disconnected")
             self.experiments.request_stop("interrupted", reason or "Acquisition disconnected")
 
     @asynccontextmanager
-    async def controls(self, *, batch: bool = False) -> AsyncIterator[None]:
-        if self.operation_lock.locked() or (self.experiments.active and not batch):
+    async def controls(self, *, batch: bool = False, calibration: bool = False) -> AsyncIterator[None]:
+        if (
+            self.operation_lock.locked()
+            or (self.experiments.active and not batch)
+            or (self.calibration.active and not calibration)
+        ):
             raise HTTPException(status_code=409, detail="Experiment or configuration owns these controls")
         async with self.operation_lock:
             yield
@@ -97,6 +104,8 @@ class Runtime:
             return
         if sample["valid"]:
             self.sample_rate.add(received_at)
+        if self.radio is not None:
+            self.calibration.observe(sample, self.radio, received_at)
         try:
             if self.experiments.active:
                 self.experiments.record_sample(sample)
@@ -125,6 +134,8 @@ class Runtime:
                 logger.warning("Dashboard client could not be closed: %s", error)
 
     def status(self) -> dict[str, Any]:
+        if self.radio:
+            self.calibration.check_boards(self.radio)
         return {
             "source": self.source,
             "connected": self.connected,
@@ -139,6 +150,7 @@ class Runtime:
             "observed_hz": self.sample_rate.value(),
             "radio": self.radio.status() if self.radio else {"supported": False},
             "experiment": self.experiments.status(),
+            "calibration": self.calibration.status(),
         }
 
 
@@ -404,6 +416,42 @@ async def set_prior(payload: PriorInput) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=str(error)) from error
         runtime.recorder.record_prior(prior)
     return prior.to_dict()
+
+
+def calibration_radio() -> RadioControl:
+    if runtime.source != "dual-serial" or runtime.radio is None or not runtime.connected:
+        raise HTTPException(status_code=409, detail="Calibration apply requires both USB-connected boards")
+    return runtime.radio
+
+
+@app.post("/api/calibration/start")
+async def start_calibration(payload: CalibrationInput) -> dict[str, Any]:
+    async with runtime.controls():
+        try:
+            return await runtime.calibration.start(calibration_radio(), payload)
+        except ControlError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/calibration/stop")
+async def stop_calibration() -> dict[str, Any]:
+    async with runtime.controls(calibration=True):
+        return runtime.calibration.stop()
+
+
+@app.post("/api/calibration/apply")
+async def apply_calibration(payload: CalibrationApplyInput) -> dict[str, Any]:
+    async with runtime.controls():
+        try:
+            return await runtime.calibration.apply(calibration_radio(), payload.id)
+        except ControlError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except OSError as error:
+            logger.exception("Calibration audit storage failed")
+            runtime.last_error = (
+                f"Calibration audit storage failed; inspect board state before retrying: {error}"
+            )
+            raise HTTPException(status_code=500, detail=runtime.last_error) from error
 
 
 @app.post("/api/recording/start")

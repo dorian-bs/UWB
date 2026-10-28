@@ -52,16 +52,17 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
     update(status) {
       const state = status.experiment;
       const locked = experimentLocked(state);
-      byId("experiment-fields").disabled = locked || submitting;
+      const calibrating = status.calibration?.active === true;
+      byId("experiment-fields").disabled = locked || submitting || calibrating;
       byId("experiment-start").disabled = locked || submitting || status.recording ||
-        !status.connected || !status.prior || status.radio?.busy === true;
+        !status.connected || !status.prior || status.radio?.busy === true || calibrating;
       byId("experiment-stop").disabled = !locked;
       const waiting = locked && state.phase === "waiting";
       byId("experiment-next").hidden = !waiting;
       byId("experiment-next").disabled = !waiting;
       if (waiting) byId("experiment-next").textContent = `Start run ${state.run_index}/${state.run_count}`;
       for (const form of ["prior-form", "recording-form"]) {
-        byId(form).querySelectorAll("input,select,button").forEach((input) => { input.disabled = locked; });
+        byId(form).querySelectorAll("input,select,button").forEach((input) => { input.disabled = locked || calibrating; });
       }
       const prior = locked ? state.prior : status.prior;
       byId("experiment-prior").textContent = prior

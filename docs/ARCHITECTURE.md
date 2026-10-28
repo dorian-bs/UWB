@@ -134,6 +134,7 @@ Newline-framed ASCII commands use decimal integer arguments and a uint32 request
 UWB <id> GET
 UWB <id> PAUSE
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power>
+UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power> <tx_ant_dly> <rx_ant_dly>
 UWB <id> RESUME
 ```
 
@@ -141,6 +142,12 @@ UWB <id> RESUME
 preambles: 64/128/256/512/1024; rates: 850/6800 kbps.
 TX power is a raw uint32 DW3000 register, not dBm. The UI shows hexadecimal;
 the protocol uses decimal. Supported numeric values are not RF certification.
+The extended `SET` includes absolute unsigned 16-bit TX/RX antenna-delay registers
+(0-65535 DTU); legacy `SET` preserves their current values. GET/ACK adds
+`tx_ant_dly` and `rx_ant_dly` read from the DW3000, without changing protocol v1.
+Missing delay fields identify older firmware and disable calibration apply only.
+Radio reconfiguration preserves the current delays; reboot restores compile-time
+defaults. There are no flash/OTP writes.
 
 Acknowledgements and rejections include current board state:
 
@@ -177,6 +184,8 @@ FastAPI's `/docs` lists the request schemas.
 | `POST /api/prior` | Apply a revisioned geometry prior |
 | `POST /api/recording/start`, `/stop` | Manual recording |
 | `POST /api/radio` | Apply `sampling_hz`, `channel`, `preamble`, `data_rate`, `tx_power` |
+| `POST /api/calibration/start`, `/stop` | Host-verified dual-USB capture; known distance, sample target and tolerance |
+| `POST /api/calibration/apply` | Apply the completed capture ID; no browser-supplied register values |
 | `POST /api/experiments/start`, `/stop` | Host-owned batch scheduling |
 | `GET /api/experiments`, `/api/experiments/{batch_id}` | Saved batches and run summaries |
 | `GET /api/analysis/methods` | Method catalogue and parameter schema |
@@ -189,8 +198,25 @@ returns 409. Errors are shown explicitly rather than reported as success.
 Dashboard assets use `Cache-Control: no-store`; already-open tabs need a refresh
 after a host update.
 
-Display preferences and calibration capture are browser-local. The calibration
-assistant provides suggestions, never firmware writes.
+Display preferences and non-dual-USB calibration suggestions are browser-local.
+`calibration.py` owns dual-USB capture/provenance and evaluation. The host uses
+parsed fresh telemetry only, locks conflicting operations during capture/apply,
+and rejects identity/revision/connection changes, non-increasing clocks/sequences,
+existing empirical corrections, incomplete captures and stale data.
+Server status supplies counts, statistics, proposed register values and outcome;
+refreshing the browser does not restart or abandon a host capture.
+
+The equal-four-register method maps signed range bias to a rounded common
+increment with `2 * 299702547 / (499.2e6 * 128)` metres per DTU. This calibrates
+a pair offset, not independent board delays. The existing radio transaction
+checks the full captured baseline immediately before writes, acknowledges and
+verifies both boards, and restores per-board delays on recovery. Radio revision
+changes identify subsequent measurements without changing the range-v1 schema.
+Calibration intent and outcome, samples, method, parameters and register readback
+are atomically saved to `data/sessions/calibrations/<id>.json`, independently of
+manual recording. An unfinished `applying` audit is not a confirmed application.
+USB connection epochs and telemetry clock checks reject observed restarts;
+global firmware boot identity is still a limitation.
 See the [host guide](../host/README.md) for operation.
 
 ## Extend only when needed

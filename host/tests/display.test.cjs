@@ -32,6 +32,35 @@ test("calibration recommendation follows error sign and tolerance", () => {
   assert.equal(api.calibrationDirection({ errorM: 0.005, toleranceM: 0.01 }), "none");
 });
 
+test("hardware calibration apply requires a completed fresh supported capture", () => {
+  const states = {
+    tx: { board: 1, role: "tx", revision: 4, running: true, tx_ant_dly: 16380, rx_ant_dly: 16380 },
+    rx: { board: 2, role: "rx", revision: 4, running: true, tx_ant_dly: 16382, rx_ant_dly: 16382 },
+  };
+  const status = { source: "dual-serial", connected: true, experiment: { active: false },
+    radio: { supported: true, ready: true, busy: false, boards: {
+      tx: { connected: true, state: states.tx }, rx: { connected: true, state: states.rx },
+    } } };
+  const capture = { id: "capture", phase: "ready", before: states, delta_dtu: 10,
+    proposed: { tx: {tx_ant_dly: 16390, rx_ant_dly: 16390}, rx: {tx_ant_dly: 16392, rx_ant_dly: 16392} } };
+  assert.equal(api.hardwareCalibrationView(status, capture).canApply, true);
+  assert.match(api.hardwareCalibrationView(status, capture).message, /16380.*16390/);
+  for (const change of [{phase: "capturing"}, {phase: "applied"}, {phase: "invalid"}, {delta_dtu: 0}]) {
+    assert.equal(api.hardwareCalibrationView(status, {...capture, ...change}).canApply, false);
+  }
+  for (const change of [{source: "demo"}, {source: "replay"}, {connected: false},
+    {experiment: {active: true}}, {radio: {...status.radio, busy: true}}]) {
+    assert.equal(api.hardwareCalibrationView({...status, ...change}, capture).canApply, false);
+  }
+  const stale = plain(status);
+  stale.radio.boards.tx.state.revision++;
+  assert.equal(api.hardwareCalibrationView(stale, capture).canApply, false);
+  const old = plain(status);
+  delete old.radio.boards.rx.state.tx_ant_dly;
+  assert.equal(api.hardwareCalibrationView(old, capture).canApply, false);
+  assert.match(api.hardwareCalibrationView(old, capture).message, /firmware/);
+});
+
 test("calibration form inputs reject invalid values and parse valid entries", () => {
   assert.throws(
     () => api.calibrationInputs({ known_distance_m: "0", target_samples: "10", tolerance_m: "0.01", dtu_per_cm: "42" }),
@@ -290,6 +319,97 @@ test("dashboard markup includes antenna-delay calibration assistant panel", () =
   assert.match(html, /id="calibration-form"/);
   assert.match(
     html,
-    /Recommendation only: valid for controlled fixed-LOS real-hardware captures; not for demo\/replay\./,
+    /Valid for controlled fixed-LOS real-hardware captures; not for demo\/replay\./,
   );
+  assert.match(html, /id="calibration-apply"[^>]*disabled/);
+  assert.match(html, /Settings last until each board restarts/);
+});
+
+test("dashboard wires hardware capture, server preview, apply and reset without client-side offsets", async () => {
+  const elements = new Map();
+  class Element {
+    constructor() {
+      this.value = ""; this.textContent = ""; this.disabled = false;
+      this.events = {}; this.style = {setProperty() {}};
+      this.classList = {toggle() {}, remove() {}};
+      this.elements = {namedItem: (name) => byId(name)};
+    }
+    addEventListener(name, callback) { this.events[name] = callback; }
+    setAttribute() {}
+    querySelectorAll() { return []; }
+    getBoundingClientRect() { return {width: 800, height: 300}; }
+    getContext() { return new Proxy({}, {get: () => () => {}, set: () => true}); }
+  }
+  function byId(id) {
+    if (!elements.has(id)) elements.set(id, new Element());
+    return elements.get(id);
+  }
+  const state = (role) => ({board: role === "tx" ? 1 : 2, role, revision: 0, period_ms: 1000,
+    channel: 9, preamble: 128, data_rate: 6800, tx_power: 42, running: true, tx_ant_dly: 16380, rx_ant_dly: 16380});
+  const status = {source: "dual-serial", connected: true, experiment: {active: false}, calibration: {phase: "idle"},
+    radio: {supported: true, ready: true, busy: false, boards: {
+      tx: {connected: true, state: state("tx")}, rx: {connected: true, state: state("rx")},
+    }}};
+  const posts = [], ticks = [], sockets = [];
+  let rejected = false;
+  const sandbox = {
+    module: {exports: {}}, console,
+    document: {getElementById: byId, querySelectorAll: () => [], querySelector: byId,
+      documentElement: byId("root")},
+    window: {devicePixelRatio: 1, addEventListener() {}},
+    location: {protocol: "http:", host: "localhost"},
+    localStorage: {getItem: () => null, setItem() {}},
+    FormData: class { constructor(form) { return Object.entries(form.fields); } },
+    WebSocket: class { constructor() { sockets.push(this); } },
+    setInterval: (callback) => ticks.push(callback), setTimeout() {},
+    startExperimentPanel: () => ({update() {}}), startAnalysisPanel: () => ({update() {}}),
+    formatAnalysisValue: (value) => Number.isFinite(value) ? String(value) : "--",
+    fetch: async (path, options) => {
+      if (options.method === "POST") posts.push([path, JSON.parse(options.body || "{}")]);
+      if (path === "/api/calibration/start") status.calibration = {
+        id: "verified-capture", phase: "capturing", active: true, count: 0, skipped: 0,
+        parameters: {known_distance_m: 5, target_samples: 3}, before: {tx: state("tx"), rx: state("rx")},
+      };
+      if (path === "/api/calibration/apply") {
+        if (rejected) return {ok: false, json: async () => ({detail: "Board settings changed; capture again"})};
+        status.calibration.phase = "applied";
+      }
+      if (path === "/api/calibration/stop") status.calibration.phase = "invalid";
+      return {ok: true, json: async () => plain(path === "/api/status" ? status : status.calibration)};
+    },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(script, sandbox);
+  await sockets[0].onopen();
+  await ticks[0]();
+  assert.equal(byId("calibration-apply").disabled, true);
+  byId("calibration-form").fields = {
+    known_distance_m: "5", target_samples: "3", tolerance_m: "0.01", dtu_per_cm: "999",
+  };
+  await byId("calibration-form").events.submit({preventDefault() {}, target: byId("calibration-form")});
+  assert.deepEqual(posts[0], ["/api/calibration/start", {
+    known_distance_m: 5, target_samples: 3, tolerance_m: 0.01,
+  }]);
+  assert.equal(byId("calibration-start").disabled, true);
+  status.calibration = {...status.calibration, active: false, phase: "ready", count: 3,
+    delta_dtu: 10, error_m: 0.0938,
+    corrected: {mean: 5.0938, std: 0, min: 5.0938, max: 5.0938},
+    raw: {mean: 5.0938, std: 0, min: 5.0938, max: 5.0938},
+    proposed: {tx: {tx_ant_dly: 16390, rx_ant_dly: 16390}, rx: {tx_ant_dly: 16390, rx_ant_dly: 16390}}};
+  await ticks[0]();
+  assert.equal(byId("calibration-captured").textContent, "3");
+  assert.equal(byId("calibration-apply").disabled, false);
+  assert.match(byId("calibration-hardware").textContent, /\+10 DTU/);
+  rejected = true;
+  await byId("calibration-apply").events.click();
+  assert.match(byId("calibration-error").textContent, /Board settings changed/);
+  rejected = false;
+  await byId("calibration-apply").events.click();
+  assert.deepEqual(posts.at(-1), ["/api/calibration/apply", {id: "verified-capture"}]);
+  assert.equal(byId("calibration-apply").disabled, true);
+  assert.match(byId("calibration-hardware").textContent, /acknowledged/);
+  await byId("calibration-reset").events.click();
+  assert.equal(byId("calibration-captured").textContent, "0");
+  assert.equal(byId("calibration-apply").disabled, true);
+  assert.ok(posts.every(([path]) => path.startsWith("/api/calibration/")));
 });

@@ -25,6 +25,8 @@ void qorvo_control_read(qorvo_radio_state_t *state)
     state->preamble = hardware.preamble;
     state->data_rate = hardware.data_rate;
     state->tx_power = hardware.tx_power;
+    state->tx_ant_dly = hardware.tx_ant_dly;
+    state->rx_ant_dly = hardware.rx_ant_dly;
 }
 
 void qorvo_control_pause(void) { pauses++; }
@@ -38,6 +40,8 @@ bool qorvo_control_apply(const qorvo_radio_state_t *requested)
     hardware.data_rate = requested->data_rate;
     if (fail_apply) return false;
     hardware.tx_power = requested->tx_power;
+    hardware.tx_ant_dly = requested->tx_ant_dly;
+    hardware.rx_ant_dly = requested->rx_ant_dly;
     return true;
 }
 
@@ -53,7 +57,7 @@ static void expect(const char *text) { assert(strstr(ack, text)); }
 int main(void)
 {
     hardware = (qorvo_radio_state_t){.channel=9, .preamble=128, .data_rate=6800,
-                                   .tx_power=0x12345678};
+                                   .tx_power=0x12345678, .tx_ant_dly=16380, .rx_ant_dly=16380};
     qorvo_control_init(1, false);
     feed("UWB 42 GE");
     assert(ack[0] == '\0');
@@ -62,7 +66,11 @@ int main(void)
     expect("\"role\":\"tx\"");
     expect("\"revision\":0,\"period_ms\":1000");
     expect("\"tx_power\":305419896,\"running\":true");
+    expect("\"tx_ant_dly\":16380,\"rx_ant_dly\":16380");
 
+    feed("UWB 43 SET 1 100 5 256 850 4294967295 12345 23456\n");
+    expect("\"error\":\"must_pause\"");
+    assert(applies == 0);
     feed("UWB 43 SET 1 100 5 256 850 4294967295\n");
     expect("\"error\":\"must_pause\"");
     assert(applies == 0);
@@ -72,6 +80,7 @@ int main(void)
     feed("UWB 45 SET 1 100 5 256 850 4294967295\n");
     expect("\"revision\":1,\"period_ms\":100,\"channel\":5");
     expect("\"preamble\":256,\"data_rate\":850,\"tx_power\":4294967295");
+    expect("\"tx_ant_dly\":16380,\"rx_ant_dly\":16380");
     assert(applies == 1);
     feed("UWB 46 RESUME\n");
     expect("\"running\":true");
@@ -161,6 +170,69 @@ int main(void)
     expect("\"revision\":1,\"period_ms\":100,\"channel\":9");
     expect("\"preamble\":64,\"data_rate\":850,\"tx_power\":42,\"running\":false");
     assert(qorvo_control_state()->revision == 1);
+
+    feed("UWB 61 SET 2 200 5 256 6800 24 12345 23456\n");
+    expect("\"id\":61,\"ok\":true");
+    expect("\"tx_ant_dly\":12345,\"rx_ant_dly\":23456");
+    feed("UWB 62 SET 3 300 9 128 850 42\n");
+    expect("\"id\":62,\"ok\":true");
+    expect("\"tx_ant_dly\":12345,\"rx_ant_dly\":23456");
+
+    unsigned previous_applies = applies;
+    const char *invalid_delays[] = {
+        "UWB 63 SET 4 100 9 128 6800 1 65536 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 65536\n",
+        "UWB 63 SET 4 100 9 128 6800 1 4294967296 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 4294967296\n",
+        "UWB 63 SET 4 100 9 128 6800 1 -1 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 -1\n",
+        "UWB 63 SET 4 100 9 128 6800 1 +1 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 +1\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0x10 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 0x10\n",
+        "UWB 63 SET 4 100 9 128 6800 1 1.0 0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 0 1.0\n",
+        "UWB 63 SET 4 100 9 128 6800 1 12345\n",
+        "UWB 63 SET 4 100 9 128 6800 1 12345 23456 EXTRA\n",
+        "UWB 63 SET 4 100 9 128 6800 1 12345 23456 1 2 3\n"
+    };
+    for (size_t i=0; i<sizeof(invalid_delays)/sizeof(invalid_delays[0]); i++) {
+        feed(invalid_delays[i]);
+        expect("\"ok\":false");
+        expect("\"tx_ant_dly\":12345,\"rx_ant_dly\":23456");
+        assert(applies == previous_applies);
+        assert(qorvo_control_state()->revision == 3);
+    }
+    feed("UWB 64 SET 4 100 9 128 6800 1 0");
+    assert(applies == previous_applies);
+    feed(" 65535\n");
+    expect("\"ok\":true");
+    expect("\"tx_ant_dly\":0,\"rx_ant_dly\":65535");
+    feed("UWB 65 SET 5 100 9 128 6800 1 65535 0\n");
+    expect("\"ok\":true");
+    expect("\"tx_ant_dly\":65535,\"rx_ant_dly\":0");
+    fail_apply = true;
+    feed("UWB 66 SET 6 200 5 256 850 42 11111 22222\n");
+    expect("\"error\":\"radio_config_failed\"");
+    expect("\"revision\":5,\"period_ms\":100");
+    expect("\"tx_ant_dly\":65535,\"rx_ant_dly\":0");
+    feed("UWB 67 RESUME\n");
+    expect("\"error\":\"radio_config_failed\"");
+    fail_apply = false;
+
+    hardware.tx_ant_dly = 13579;
+    hardware.rx_ant_dly = 24680;
+    feed("UWB 68 GET\n");
+    expect("\"tx_ant_dly\":13579,\"rx_ant_dly\":24680");
+    hardware.tx_ant_dly = 11111;
+    hardware.rx_ant_dly = 22222;
+    feed("UWB 69 SET 6 100 9 128 6800 1\n");
+    expect("\"id\":69,\"ok\":true");
+    expect("\"tx_ant_dly\":11111,\"rx_ant_dly\":22222");
+    assert(hardware.tx_ant_dly == 11111 && hardware.rx_ant_dly == 22222);
+    feed("UWB 70 RESUME\n");
+    expect("\"ok\":true");
+    expect("\"running\":true,\"tx_ant_dly\":11111,\"rx_ant_dly\":22222");
     puts("native control tests passed");
     return 0;
 }

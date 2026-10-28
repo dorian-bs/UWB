@@ -66,7 +66,10 @@ uint8_t USBD_CDC_TransmitPacket(USBD_HandleTypeDef *dev)
 { (void)dev; assert(mask); cdc.TxState = 1; sent++; return USBD_OK; }
 void USBD_CDC_ReceivePacket(USBD_HandleTypeDef *dev) { (void)dev; rearmed++; }
 void qorvo_control_read(qorvo_radio_state_t *state)
-{ state->channel=9; state->preamble=128; state->data_rate=6800; state->tx_power=7; }
+{
+    state->channel=9; state->preamble=128; state->data_rate=6800; state->tx_power=7;
+    state->tx_ant_dly=16380; state->rx_ant_dly=16380;
+}
 void qorvo_control_pause(void) { pauses++; }
 bool qorvo_control_apply(const qorvo_radio_state_t *state) { (void)state; return true; }
 bool qorvo_control_resume(void) { return true; }

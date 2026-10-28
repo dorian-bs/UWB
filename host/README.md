@@ -174,17 +174,55 @@ Enter known distance, target sample count (at least two), and tolerance; start
 capture, then review corrected-range bias and the raw-range reference.
 Capture stops at the target, or can be stopped/reset manually.
 
-Recommendations are **suggestions only**: positive bias suggests increasing TX/RX
-antenna delays equally on both boards; negative bias suggests decreasing them.
-Within tolerance, no change is suggested. The optional DTU-per-cm hint is an
-operator-supplied estimate, not an automatically calibrated conversion.
+### Apply the evaluated calibration to hardware
 
-Manually adjust `QORVO_TX_ANT_DLY_DTU` and `QORVO_RX_ANT_DLY_DTU` in
-[qorvo_port.c](../epuck-stm32-main/ThirdParty/qorvo_dw3/platform/qorvo_port.c),
-rebuild/reflash, and collect a new validation run.
-The assistant never writes to the boards. Capture is browser-local, lost on
-reload, and not a saved calibration artifact; record a session separately if needed.
-Demo/replay can exercise the UI but cannot validate physical calibration.
+1. Update **both STM32 boards** with the firmware containing antenna-delay USB
+   control support (one-time build/flash using the root guide). Connect both over
+   USB and run the dashboard in `dual-serial` mode. Old firmware disables apply;
+   ordinary radio controls still work.
+2. Fix the boards at an accurately measured antenna-to-antenna LOS distance,
+   clear of nearby reflectors. Keep orientation, mounting and radio settings fixed.
+   Enter distance, tolerance and 2-10000 target samples, then **Start capture**.
+   Dual-USB captures are collected by the host and survive browser reloads.
+3. Review the mean error and proposed old/new TX and RX antenna delays for each
+   board. **Apply evaluated delays to both boards** pauses ranging, writes and
+   reads back the registers, then resumes the responder before the initiator.
+   Failure/cancellation attempts rollback; inspect any unknown or paused states.
+4. Capture again to check residual bias, then validate at other distances on
+   independent runs. A low bias at the calibration distance is not proof of
+   accuracy everywhere or lower random noise.
+
+The update is **runtime-only**: each board returns to its firmware defaults after
+restart. Subsequent UI adjustments require no reflashing; no flash or OTP is
+written. The calibration identifies a **pair offset**, not independent per-board
+delays. Recalibrate/validate after channel, mounting or orientation changes.
+
+Positive bias increases all four TX/RX registers equally; negative bias decreases
+them. The host computes `delta = round(error_m / (2 * c * DWT_TIME_UNITS))`, with
+`c = 299702547 m/s` and `DWT_TIME_UNITS = 1 / (499.2e6 * 128) s`, matching firmware.
+One DTU on all four registers changes the pair range by about **9.38 mm**.
+Within tolerance or below rounding to one DTU, no update is sent.
+The editable manual DTU hint is **never used for hardware apply**. If raw and
+corrected ranges already differ, hardware application is blocked to avoid
+calibrating an empirical correction into the timestamps.
+
+Calibration and radio/prior/experiment changes cannot run concurrently.
+Stopped/incomplete captures, resets, reconnects, changed configurations or
+30 seconds without fresh measurements require a new capture. Applying twice from
+the same result is rejected. Boot IDs are not available, so restart a recording
+after any board reboot; USB connection epochs and observed clock resets provide
+guards, not global device identities.
+
+Before applying, the host saves intent, exact input samples, parameters, method,
+and old/proposed settings to `data/sessions/calibrations/<capture-id>.json`, then
+records the outcome and actual readback. This happens even without manual
+recording. An `applying` audit after a host crash means **unconfirmed**, not success.
+During recording, `radio.ndjson` and sample `radio_revision` retain the change.
+Historical measurements are never overwritten; `raw_m` remains the timestamp
+result under the hardware settings effective for that sample.
+
+Other sources retain the browser-local suggestion-only assistant; demo/replay
+cannot apply to boards or validate physical calibration.
 
 ## Tests
 

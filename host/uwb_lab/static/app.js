@@ -233,6 +233,34 @@ function radioAvailable(radio) {
     radio.boards.tx.state.board !== radio.boards.rx.state.board);
 }
 
+function hardwareCalibrationView(status, capture) {
+  const blocked = (message) => ({ canStart: false, canApply: false, message });
+  if (status?.source !== "dual-serial") return blocked("Hardware apply requires dual-serial mode with both USB boards.");
+  if (!status.connected || !radioAvailable(status.radio) || !status.radio.ready) {
+    return blocked("Waiting for both USB boards to be ready; hardware apply unavailable.");
+  }
+  const boards = status.radio.boards;
+  if (["tx", "rx"].some((role) =>
+    ["tx_ant_dly", "rx_ant_dly"].some((key) => !Number.isInteger(boards[role].state[key])))) {
+    return blocked("Update firmware on both boards to enable antenna-delay readback and apply.");
+  }
+  if (status.experiment?.active) return blocked("Calibration is locked throughout an experiment.");
+  const result = { canStart: !capture?.active, canApply: false, message: "Start a fresh hardware capture to evaluate delays." };
+  if (!capture?.id) return result;
+  if (capture.phase === "applied") return {...result, message: "Both boards acknowledged the new delays. Capture again to validate. Settings last until board restart."};
+  if (capture.error) return {...result, message: capture.error};
+  if (capture.phase !== "ready") return {...result, message: `Hardware calibration: ${capture.phase}.`};
+  if (["tx", "rx"].some((role) => Object.entries(capture.before[role]).some(([key, value]) =>
+    boards[role].state[key] !== value))) return {...result, message: "Board settings changed; capture again."};
+  if (!capture.delta_dtu) return {...result, message: "No hardware change needed: within tolerance or below one DTU."};
+  const targets = ["tx", "rx"].map((role) => {
+    const old = capture.before[role], next = capture.proposed[role];
+    return `${role.toUpperCase()} board #${old.board}: TX ${old.tx_ant_dly} -> ${next.tx_ant_dly}, RX ${old.rx_ant_dly} -> ${next.rx_ant_dly}`;
+  });
+  return {...result, canApply: true,
+    message: `${capture.delta_dtu > 0 ? "+" : ""}${capture.delta_dtu} DTU to each of the four antenna-delay registers. ${targets.join("; ")}.`};
+}
+
 function startDashboard() {
   const byId = (id) => document.getElementById(id);
   const format = (value) => formatAnalysisValue(value, "m");
@@ -244,6 +272,10 @@ function startDashboard() {
   let radioSubmitting = false;
   let calibrationDtuPerCm = 0;
   let calibrationStickyNote = "";
+  let latestStatus = null;
+  let hardwareCalibration = null;
+  let dismissedCalibrationId = null;
+  let calibrationSubmitting = false;
   const calibration = createCalibrationState();
   const showError = (id, message) => {
     byId(id).textContent = message;
@@ -351,6 +383,32 @@ function startDashboard() {
       hasActivity: calibration.captured || calibration.skipped || calibration.running,
       recommendation: recommendationText(summary),
     });
+    const hardware = hardwareCalibrationView(latestStatus, hardwareCalibration);
+    const remote = hardwareCalibration;
+    if (remote) {
+      byId("calibration-state").textContent = `${remote.phase}: ${remote.count}/${remote.parameters.target_samples}`;
+      byId("calibration-captured").textContent = String(remote.count);
+      byId("calibration-skipped").textContent = String(remote.skipped);
+      for (const field of ["corrected", "raw"]) {
+        const stats = remote[field] ?? {};
+        byId(`calibration-${field}-mean`).textContent = formatCalibrationValue(stats.mean);
+        byId(`calibration-${field}-std`).textContent = formatCalibrationValue(stats.std);
+        byId(`calibration-${field}-range`).textContent = formatCalibrationRange(stats);
+      }
+      byId("calibration-error-m").textContent = formatCalibrationValue(remote.error_m);
+      byId("calibration-recommendation").textContent = hardware.message;
+    }
+    const capturing = remote ? remote.active : calibration.running;
+    byId("calibration-start").disabled = calibrationSubmitting || capturing ||
+      (latestStatus?.source === "dual-serial" && !hardware.canStart);
+    byId("calibration-stop").disabled = calibrationSubmitting || !capturing;
+    byId("calibration-reset").disabled = calibrationSubmitting || remote?.phase === "applying";
+    byId("calibration-form").querySelectorAll("input").forEach((input) => {
+      input.disabled = capturing || calibrationSubmitting;
+    });
+    byId("calibration-apply").disabled = calibrationSubmitting || !streamOpen || !hardware.canApply;
+    byId("calibration-hardware").textContent = calibrationSubmitting
+      ? "Waiting for host confirmation..." : hardware.message;
   }
 
   function drawChart(canvas, samples, settings) {
@@ -464,6 +522,9 @@ function startDashboard() {
   async function refreshStatus() {
     try {
       const status = await request("/api/status");
+      latestStatus = status;
+      hardwareCalibration = status.source === "dual-serial" && status.calibration?.id &&
+        status.calibration.id !== dismissedCalibrationId ? status.calibration : null;
       byId("status-dot").classList.toggle("connected", status.connected && streamOpen);
       byId("connection-label").textContent = !streamOpen ? "Stream reconnecting" : status.connected ? "Live" : "Source disconnected";
       byId("source-label").textContent = status.source;
@@ -480,6 +541,7 @@ function startDashboard() {
       updateRadioStatus(status);
       experimentPanel.update(status);
       analysisPanel.update(status);
+      renderCalibration();
     } catch (error) {
       byId("status-dot").classList.remove("connected");
       byId("connection-label").textContent = "Host unavailable";
@@ -487,6 +549,8 @@ function startDashboard() {
       byId("radio-fields").disabled = true;
       byId("radio-refresh").disabled = true;
       byId("experiment-start").disabled = true;
+      latestStatus = null;
+      renderCalibration();
     }
   }
   function loadRadioFields(state) {
@@ -499,8 +563,8 @@ function startDashboard() {
   function updateRadioStatus(status) {
     const radio = status.radio;
     const available = radioAvailable(radio);
-    byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active;
-    byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active;
+    byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
+    byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
     byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} successful samples/s`;
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
@@ -512,7 +576,7 @@ function startDashboard() {
       const lost = board.telemetry_dropped || 0;
       if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}; USB lines discarded: ${lost}`;
       const power = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
-      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
+      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; antenna TX/RX ${state.tx_ant_dly ?? "--"}/${state.rx_ant_dly ?? "--"} DTU; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
     });
     byId("radio-state").textContent = descriptions.join("\n");
     if (radio.last_error) showError("radio-error", radio.last_error);
@@ -541,6 +605,7 @@ function startDashboard() {
     };
     socket.onclose = () => {
       streamOpen = false;
+      byId("calibration-apply").disabled = true;
       byId("status-dot").classList.remove("connected");
       byId("connection-label").textContent = "Stream reconnecting";
       setTimeout(connect, 1500);
@@ -597,11 +662,22 @@ function startDashboard() {
       await refreshStatus();
     } catch (error) { showError("recording-error", error.message); }
   });
-  byId("calibration-form").addEventListener("submit", (event) => {
+  byId("calibration-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     showError("calibration-error", "");
     try {
       const fields = calibrationInputs(Object.fromEntries(new FormData(event.target)));
+      calibrationSubmitting = true;
+      renderCalibration();
+      const status = await request("/api/status");
+      if (status.source === "dual-serial") {
+        hardwareCalibration = await request("/api/calibration/start", {method: "POST", body: JSON.stringify({
+          known_distance_m: fields.knownDistanceM, target_samples: fields.targetSamples, tolerance_m: fields.toleranceM,
+        })});
+        dismissedCalibrationId = null;
+        calibrationReset(calibration);
+        return;
+      }
       calibrationDtuPerCm = fields.dtuPerCm;
       calibrationStickyNote = "";
       calibrationStart(calibration, fields);
@@ -609,19 +685,42 @@ function startDashboard() {
     } catch (error) {
       showError("calibration-error", error.message);
       renderCalibration();
+    } finally {
+      calibrationSubmitting = false;
+      await refreshStatus();
     }
   });
-  byId("calibration-stop").addEventListener("click", () => {
-    calibration.running = false;
-    calibrationStickyNote = "";
+  async function stopCalibration(reset) {
+    calibrationSubmitting = true;
+    try {
+      if (hardwareCalibration) {
+        await request("/api/calibration/stop", {method: "POST"});
+        if (reset) {
+          dismissedCalibrationId = hardwareCalibration.id;
+          hardwareCalibration = null;
+        }
+      }
+      calibration.running = false;
+      calibrationStickyNote = "";
+      if (reset) calibrationDtuPerCm = calibrationReset(calibration).dtuPerCm;
+      showError("calibration-error", "");
+    } catch (error) { showError("calibration-error", error.message); }
+    finally { calibrationSubmitting = false; await refreshStatus(); }
+  }
+  byId("calibration-stop").addEventListener("click", () => stopCalibration(false));
+  byId("calibration-reset").addEventListener("click", () => stopCalibration(true));
+  byId("calibration-apply").addEventListener("click", async () => {
+    const hardware = hardwareCalibrationView(latestStatus, hardwareCalibration);
+    if (calibrationSubmitting || !hardware.canApply) return;
+    calibrationSubmitting = true;
+    showError("calibration-error", "");
     renderCalibration();
-  });
-  byId("calibration-reset").addEventListener("click", () => {
-    const reset = calibrationReset(calibration);
-    calibrationDtuPerCm = reset.dtuPerCm;
-    calibrationStickyNote = "";
-    showError("calibration-error", reset.errorMessage);
-    renderCalibration();
+    try {
+      hardwareCalibration = await request("/api/calibration/apply", {
+        method: "POST", body: JSON.stringify({id: hardwareCalibration.id}),
+      });
+    } catch (error) { showError("calibration-error", error.message); }
+    finally { calibrationSubmitting = false; await refreshStatus(); }
   });
   byId("radio-refresh").addEventListener("click", async () => {
     try {
@@ -659,5 +758,6 @@ if (typeof module !== "undefined") module.exports = {
   DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
   createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
   calibrationShouldStop, calibrationReset, calibrationInputs, resolveCalibrationStatusMessage,
+  hardwareCalibrationView,
 };
 if (typeof document !== "undefined") startDashboard();

@@ -270,7 +270,7 @@
             <label>Tolerance (m)
               <input id="calibration-tolerance" name="tolerance_m" type="number" min="0" step="0.001" value="0.010" required>
             </label>
-            <label>DTU per cm (hint)
+            <label>Manual DTU per cm hint (not used for hardware apply)
               <input id="calibration-dtu-per-cm" name="dtu_per_cm" type="number" min="0" step="1" value="0" inputmode="numeric">
             </label>
             <div class="calibration-actions">
@@ -291,7 +291,10 @@
             <div><dt>Error (m)</dt><dd id="calibration-error-m">--</dd></div>
           </dl>
           <p id="calibration-recommendation" class="calibration-note" role="status">Start capture to compute a recommendation.</p>
-          <p class="calibration-note">Recommendation only: valid for controlled fixed-LOS real-hardware captures; not for demo/replay. Apply antenna-delay changes manually on both boards.</p>
+          <p class="calibration-note">Valid for controlled fixed-LOS real-hardware captures; not for demo/replay. With updated firmware and both boards on USB, the host evaluates a fresh capture and applies verified delays. A two-board calibration identifies the pair offset, not each board independently.</p>
+          <p id="calibration-hardware" class="calibration-note" role="status">Hardware apply requires dual-serial mode.</p>
+          <button id="calibration-apply" type="button" disabled>Apply evaluated delays to both boards</button>
+          <p class="calibration-note">Settings last until each board restarts. No flash/OTP writes. The host saves an audit under data/sessions/calibrations. Capture again after applying to validate accuracy; keep mounting, orientation and channel unchanged.</p>
           <p id="calibration-error" class="error" role="alert" hidden></p>
         </details>
       </section>
