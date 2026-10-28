@@ -25,7 +25,7 @@
       <section id="batch-progress" class="analysis-panel" aria-label="Experiment progress">
         <div class="section-title"><h2>Experiment batch</h2><span id="experiment-state" role="status">No batch started</span></div>
         <progress id="experiment-progress" max="1" value="0" aria-label="Completed experiment runs"></progress>
-        <p id="experiment-timing" class="plot-note">Configure a prior, then start a repeated experiment. Closing the browser does not stop a batch.</p>
+        <p id="experiment-timing" class="plot-note">Closing the browser does not stop a batch.</p>
         <button id="experiment-next" type="button" hidden>Start next run</button>
         <button id="experiment-stop" class="stop" type="button" disabled>Stop batch</button>
         <p id="experiment-error" class="error" role="alert" hidden></p>
@@ -138,49 +138,9 @@
     </section>
 
     <aside id="experiment-controls" class="controls">
-      <section>
-        <details id="experiment-panel" class="control-panel" open>
-        <summary><h2>Experiment setup</h2></summary>
-        <form id="experiment-form">
-          <fieldset id="experiment-fields" class="form-fields">
-            <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
-            <div class="coordinate-row">
-              <label>Run length (s)<input name="duration_s" type="number" min="0.001" step="any" value="10" required></label>
-              <label>Runs<input name="run_count" type="number" min="1" step="1" value="5" required></label>
-            </div>
-            <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="0.5" required></label>
-            <label>Start delay before each batch/run (s)<input name="start_delay_s" type="number" min="0" step="any" value="0" required></label>
-            <label class="check"><input name="manual_start" type="checkbox"> Start each run manually (interval ignored)</label>
-            <label>Notes<input name="notes" maxlength="200"></label>
-          </fieldset>
-          <p id="experiment-prior" class="plot-note">Set a distance or position prior in Geometry prior below.</p>
-          <p class="plot-note">Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.</p>
-          <button id="experiment-start" type="submit">Start batch</button>
-        </form>
-        </details>
-      </section>
-      <section>
-        <details id="analysis-panel" class="control-panel" open>
-        <summary><h2>Analysis setup</h2></summary>
-        <div id="analysis-settings" class="form-fields">
-          <label>Residual source<select name="field"><option value="corrected_m">Corrected - expected</option><option value="raw_m">Raw - expected</option></select></label>
-          <div id="analysis-methods" class="form-fields"></div>
-          <details><summary>Method parameters</summary>
-            <div class="form-fields">
-              <label>Histogram bins<input name="histogram_bins" type="number" min="1" max="200" value="30" required></label>
-              <label>GMM components<input name="components" type="number" min="1" max="6" value="2" required></label>
-              <label>GMM random seed<input name="seed" type="number" min="0" max="4294967295" value="0" required></label>
-            </div>
-          </details>
-          <button id="analysis-full" type="button">Recompute full closed dataset</button>
-          <p id="analysis-error" class="error" role="alert" hidden></p>
-        </div>
-        </details>
-      </section>
       <section aria-label="Physical radio configuration">
         <details id="radio-panel" class="control-panel">
-        <summary><h2>Radio / sampling</h2></summary>
-        <p class="plot-note">Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values.</p>
+        <summary><h2>Radio / sampling</h2><button type="button" class="info" data-tip="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. The 10 Hz limit is not a hardware guarantee." aria-label="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. The 10 Hz limit is not a hardware guarantee.">i</button></summary>
         <form id="radio-form">
           <fieldset id="radio-fields" disabled>
             <label>Requested ranging rate (Hz)
@@ -198,7 +158,6 @@
         </form>
         <button id="radio-refresh" type="button" disabled>Load current TX settings</button>
         <p id="observed-rate" class="plot-note">-- successful samples/s</p>
-        <p class="plot-note">Requested cadence is rounded to milliseconds; observed rate depends on exchange success and transport. The 10 Hz limit is not a hardware performance guarantee.</p>
         <p id="radio-result" class="plot-note" role="status"></p>
         <p id="radio-state" class="plot-note" role="status">Waiting for source status...</p>
         <p id="radio-error" class="error" role="alert" hidden></p>
@@ -257,48 +216,47 @@
       <section>
         <details id="calibration-panel" class="control-panel">
           <summary>
-            <h2>Antenna-delay calibration assistant</h2>
+            <h2>Calibration</h2>
+            <button type="button" class="info" data-tip="Antenna-delay calibration for fixed-LOS captures on real hardware (not demo/replay). With both boards on USB the host evaluates a fresh capture and applies verified delays. A two-board calibration identifies the pair offset, not each board. Delays last until restart (no flash/OTP writes); an audit is saved under data/sessions/calibrations. Re-capture after applying, keeping mounting, orientation and channel unchanged." aria-label="Antenna-delay calibration for fixed-LOS captures on real hardware (not demo/replay). With both boards on USB the host evaluates a fresh capture and applies verified delays. A two-board calibration identifies the pair offset, not each board. Delays last until restart (no flash/OTP writes); an audit is saved under data/sessions/calibrations. Re-capture after applying, keeping mounting, orientation and channel unchanged.">i</button>
             <span id="calibration-state" role="status">Idle</span>
           </summary>
           <form id="calibration-form">
-            <label>Known distance (m)
-              <input id="calibration-known-distance" name="known_distance_m" type="number" min="0.001" step="0.001" value="2.000" required>
-            </label>
-            <label>Target samples
-              <input id="calibration-target-samples" name="target_samples" type="number" min="2" max="10000" step="1" value="100" required>
-            </label>
-            <label>Tolerance (m)
-              <input id="calibration-tolerance" name="tolerance_m" type="number" min="0" step="0.001" value="0.010" required>
-            </label>
-            <label>Manual DTU per cm hint (not used for hardware apply)
-              <input id="calibration-dtu-per-cm" name="dtu_per_cm" type="number" min="0" step="1" value="0" inputmode="numeric">
-            </label>
+            <div class="coordinate-row">
+              <label>Distance (m)
+                <input id="calibration-known-distance" name="known_distance_m" type="number" min="0.001" step="0.001" value="2.000" required>
+              </label>
+              <label>Samples
+                <input id="calibration-target-samples" name="target_samples" type="number" min="2" max="10000" step="1" value="100" required>
+              </label>
+            </div>
+            <div class="coordinate-row">
+              <label>Tolerance (m)
+                <input id="calibration-tolerance" name="tolerance_m" type="number" min="0" step="0.001" value="0.010" required>
+              </label>
+              <label>DTU/cm <button type="button" class="info" data-tip="Manual hint only; not used for hardware apply." aria-label="Manual hint only; not used for hardware apply.">i</button>
+                <input id="calibration-dtu-per-cm" name="dtu_per_cm" type="number" min="0" step="1" value="0" inputmode="numeric">
+              </label>
+            </div>
             <div class="calibration-actions">
               <button id="calibration-start" type="submit">Start capture</button>
               <button id="calibration-stop" type="button">Stop capture</button>
               <button id="calibration-reset" type="button">Reset</button>
             </div>
           </form>
-          <dl class="calibration-stats">
-            <div><dt>Captured</dt><dd id="calibration-captured">0</dd></div>
-            <div><dt>Skipped</dt><dd id="calibration-skipped">0</dd></div>
-            <div><dt>Corrected mean (m)</dt><dd id="calibration-corrected-mean">--</dd></div>
-            <div><dt>Corrected std (m)</dt><dd id="calibration-corrected-std">--</dd></div>
-            <div><dt>Corrected min/max (m)</dt><dd id="calibration-corrected-range">-- / --</dd></div>
-            <div><dt>Raw mean (m)</dt><dd id="calibration-raw-mean">--</dd></div>
-            <div><dt>Raw std (m)</dt><dd id="calibration-raw-std">--</dd></div>
-            <div><dt>Raw min/max (m)</dt><dd id="calibration-raw-range">-- / --</dd></div>
-            <div><dt>Error (m)</dt><dd id="calibration-error-m">--</dd></div>
-          </dl>
+          <table class="calibration-table">
+            <thead><tr><th>m</th><th>Mean</th><th>Std</th><th>Min / max</th></tr></thead>
+            <tbody>
+              <tr><th>Corrected</th><td id="calibration-corrected-mean">--</td><td id="calibration-corrected-std">--</td><td id="calibration-corrected-range">-- / --</td></tr>
+              <tr><th>Raw</th><td id="calibration-raw-mean">--</td><td id="calibration-raw-std">--</td><td id="calibration-raw-range">-- / --</td></tr>
+            </tbody>
+          </table>
+          <p class="calibration-counts">Captured <b id="calibration-captured">0</b> · Skipped <b id="calibration-skipped">0</b> · Error <b id="calibration-error-m">--</b>&nbsp;m</p>
           <p id="calibration-recommendation" class="calibration-note" role="status">Start capture to compute a recommendation.</p>
-          <p class="calibration-note">Valid for controlled fixed-LOS real-hardware captures; not for demo/replay. With updated firmware and both boards on USB, the host evaluates a fresh capture and applies verified delays. A two-board calibration identifies the pair offset, not each board independently.</p>
           <p id="calibration-hardware" class="calibration-note" role="status">Hardware apply requires dual-serial mode.</p>
           <button id="calibration-apply" type="button" disabled>Apply evaluated delays to both boards</button>
-          <p class="calibration-note">Settings last until each board restarts. No flash/OTP writes. The host saves an audit under data/sessions/calibrations. Capture again after applying to validate accuracy; keep mounting, orientation and channel unchanged.</p>
           <p id="calibration-error" class="error" role="alert" hidden></p>
         </details>
       </section>
-
       <section>
         <details id="recording-panel" class="control-panel" open>
         <summary><h2>Recording</h2><span id="recording-state">Stopped</span></summary>
@@ -311,7 +269,44 @@
         </form>
         </details>
       </section>
-
+      <section>
+        <details id="experiment-panel" class="control-panel" open>
+        <summary><h2>Experiment setup</h2></summary>
+        <form id="experiment-form">
+          <fieldset id="experiment-fields" class="form-fields">
+            <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
+            <div class="coordinate-row">
+              <label>Run length (s)<input name="duration_s" type="number" min="0.001" step="any" value="10" required></label>
+              <label>Runs<input name="run_count" type="number" min="1" step="1" value="5" required></label>
+            </div>
+            <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="0.5" required></label>
+            <label>Start delay before each batch/run (s)<input name="start_delay_s" type="number" min="0" step="any" value="0" required></label>
+            <label class="check"><input name="manual_start" type="checkbox"> Start each run manually (interval ignored)</label>
+            <label>Notes<input name="notes" maxlength="200"></label>
+          </fieldset>
+          <p id="experiment-prior" class="plot-note">Set a distance or position prior in Geometry prior above. <button type="button" class="info" data-tip="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis." aria-label="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.">i</button></p>
+          <button id="experiment-start" type="submit">Start batch</button>
+        </form>
+        </details>
+      </section>
+      <section>
+        <details id="analysis-panel" class="control-panel">
+        <summary><h2>Analysis setup</h2></summary>
+        <div id="analysis-settings" class="form-fields">
+          <label>Residual source<select name="field"><option value="corrected_m">Corrected - expected</option><option value="raw_m">Raw - expected</option></select></label>
+          <div id="analysis-methods" class="form-fields"></div>
+          <details><summary>Method parameters</summary>
+            <div class="form-fields">
+              <label>Histogram bins<input name="histogram_bins" type="number" min="1" max="200" value="30" required></label>
+              <label>GMM components<input name="components" type="number" min="1" max="6" value="2" required></label>
+              <label>GMM random seed<input name="seed" type="number" min="0" max="4294967295" value="0" required></label>
+            </div>
+          </details>
+          <button id="analysis-full" type="button">Recompute full closed dataset</button>
+          <p id="analysis-error" class="error" role="alert" hidden></p>
+        </div>
+        </details>
+      </section>
     </aside>
       <section class="health" aria-label="Live stream health">
         <h2>Stream health</h2>

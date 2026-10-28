@@ -67,7 +67,7 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
       const prior = locked ? state.prior : status.prior;
       byId("experiment-prior").textContent = prior
         ? `${prior.mode} prior: ${formatAnalysisValue(prior.expected_distance_m, "m")} m, uncertainty ${formatAnalysisValue(prior.uncertainty_m, "m")} m; revision ${prior.revision}.`
-        : "Set a distance or position prior in Geometry prior below.";
+        : "Set a distance or position prior in Geometry prior above.";
       byId("experiment-state").textContent = state.batch_id
         ? `${locked ? state.phase : state.outcome} - run ${state.run_index}/${state.run_count}`
         : "No batch started";

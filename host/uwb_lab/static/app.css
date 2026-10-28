@@ -1,3 +1,8 @@
+/* UWB Lab dashboard styles.
+   Sections: 1 Tokens/base · 2 Layout · 3 Form controls · 4 Measurements & plots
+             5 Sidebar panels · 6 Info button · 7 Calibration · 8 Analysis · 9 Responsive */
+
+/* ---------- 1. Tokens & base ---------- */
 :root {
   --ink: #172321;
   --muted: #52615e;
@@ -7,6 +12,7 @@
   --green: #087f5b;
   --red: #b63036;
   --blue: #176b87;
+  --radius: 5px;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -14,121 +20,177 @@ body { margin: 0; color: var(--ink); background: var(--paper); font: 13px/1.4 sy
 h1, h2, p { margin: 0; }
 h1 { font-size: 19px; }
 h2 { font-size: 14px; }
-.topbar { padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.connection { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
-.status-dot.connected { background: var(--green); }
-.source-label { font-family: monospace; color: var(--muted); }
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; padding: 12px 16px; }
-.workspace.controls-hidden { grid-template-columns: minmax(0, 1fr); }
-.measurements, .controls { min-width: 0; }
-.metrics { display: flex; flex-wrap: wrap; border: 1px solid var(--line); background: var(--panel); }
-.metrics div { flex: 1 1 120px; min-width: max-content; padding: 8px 10px; border-right: 1px solid var(--line); white-space: nowrap; }
-.metrics div:last-child { border: 0; }
-.metrics span { display: block; color: var(--muted); font-size: 11px; }
-.metrics strong { font: 600 19px/1.4 ui-monospace, monospace; }
-.metrics small { margin-left: 4px; color: var(--muted); }
-.display-controls { margin-top: 10px; padding: 10px; border: 1px solid var(--line); background: var(--panel); }
-.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
-.toolbar label { width: 110px; }
-.toolbar .check { width: auto; min-height: 32px; }
-label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
-input, select, button { min-height: 32px; border: 1px solid #aab8b1; border-radius: 3px; font: inherit; }
-input, select { width: 100%; min-width: 0; padding: 4px 7px; background: var(--panel); color: var(--ink); }
-button { padding: 5px 10px; background: #edf2ef; color: var(--ink); cursor: pointer; }
-button:hover { background: #dce7e1; }
+details { margin-top: 8px; }
+summary { cursor: pointer; color: var(--muted); }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-button[aria-pressed="true"] { background: #fff0cc; border-color: #9b6900; }
-input:disabled { background: #edf0ee; color: #69746f; }
-button:disabled { cursor: not-allowed; opacity: 0.55; }
-#radio-fields { display: grid; gap: 8px; }
-#radio-refresh { margin-top: 8px; }
-#radio-state { white-space: pre-line; overflow-wrap: anywhere; }
-input[type="checkbox"] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: var(--blue); }
-fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
-legend { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
-.series-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-.series-controls label, .check { display: flex; align-items: center; gap: 6px; }
-.series-controls label { font-weight: 600; }
+
+dl { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 4px 0 0; }
+dl div { display: flex; gap: 8px; }
+dt { color: var(--muted); }
+dd { margin: 0; font: 600 13px ui-monospace, monospace; }
+
+.plot-note { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.error { margin: 8px 0; padding: 6px 8px; color: #8f2621; background: #fae9e7; border-left: 3px solid var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
+.section-title span { font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+
+/* Series colours (checkbox labels) */
 .raw { color: #536878; }
 .corrected { color: #176b87; }
 .expected { color: #966000; }
 .residual { color: #b63036; }
 .bias { color: #7851a9; }
 .spread { color: #087f5b; }
-details { margin-top: 8px; }
-summary { cursor: pointer; color: var(--muted); }
-.axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
-.axis-grid fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.axis-grid .check { grid-column: 1 / -1; }
-.plot-block { margin-top: 10px; }
-.plot-controls { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; }
-.plot-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-#view-state { color: var(--green); font-size: 12px; }
-#view-state.paused { color: #855600; font-weight: 600; }
-canvas { display: block; width: 100%; height: var(--plot-height, 300px); background: var(--panel); border: 1px solid var(--line); }
-.plot-note { color: var(--muted); font-size: 11px; margin-top: 4px; }
-.controls { padding: 10px; background: var(--panel); border: 1px solid var(--line); align-self: start; }
-.controls section + section { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
-.control-panel { margin-top: 0; }
+
+/* ---------- 2. Layout ---------- */
+.topbar { padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.connection { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.status-dot.connected { background: var(--green); }
+.source-label { font-family: monospace; color: var(--muted); }
+
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(280px, 26vw, 340px); gap: 12px; padding: 12px 16px; }
+.workspace.controls-hidden { grid-template-columns: minmax(0, 1fr); }
+.measurements, .controls { min-width: 0; }
+.health { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 8px; }
+.health h2 { font-size: 12px; }
+
+/* ---------- 3. Form controls ---------- */
+label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
+input, select, button { min-height: 32px; border: 1px solid #aab8b1; border-radius: var(--radius); font: inherit; }
+input, select { width: 100%; min-width: 0; padding: 4px 7px; background: var(--panel); color: var(--ink); }
+input:focus, select:focus { border-color: var(--blue); }
+input:disabled { background: #edf0ee; color: #69746f; }
+input[type="checkbox"] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: var(--blue); }
 .check input { width: auto; }
-.control-panel > summary { color: var(--ink); }
-.control-panel > summary h2 { display: inline; }
-.control-panel > summary span { margin-left: 8px; font: 11px ui-monospace, monospace; color: var(--muted); }
-.control-panel[open] > summary { margin-bottom: 8px; }
-.calibration-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.calibration-actions button { flex: 1 1 120px; }
-.calibration-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px;
-  margin-top: 8px;
-}
-.calibration-stats div {
-  display: grid;
-  gap: 2px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: #f5f8f6;
-}
-.calibration-stats dt { font-size: 11px; line-height: 1.35; }
-.calibration-stats dd { font-size: 12px; }
-.calibration-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
-.section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
-.section-title span { font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+button { padding: 5px 10px; background: #edf2ef; color: var(--ink); cursor: pointer; }
+button:hover { background: #dce7e1; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+button[aria-pressed="true"] { background: #fff0cc; border-color: #9b6900; }
+fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+legend { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
 form { display: grid; gap: 8px; }
 form button { color: white; background: var(--green); border-color: var(--green); }
 form button:hover { background: #066e4f; }
 button.stop { background: var(--red); border-color: var(--red); }
-.coordinate-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
-.health { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 8px; }
-.health h2 { font-size: 12px; }
-dl { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 4px 0 0; }
-dl div { display: flex; gap: 8px; }
-dt { color: var(--muted); }
-dd { margin: 0; font: 600 13px ui-monospace, monospace; }
-.error { margin: 8px 0; padding: 6px 8px; color: #8f2621; background: #fae9e7; border-left: 3px solid var(--red); font-size: 12px; overflow-wrap: anywhere; }
-.analysis-panel { background: var(--panel); border: 1px solid var(--line); padding: 10px; margin-bottom: 10px; }
-.analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
-#experiment-stop { margin-top: 8px; }
 .form-fields { display: grid; gap: 8px; }
 .form-fields > details > .form-fields { margin-top: 8px; }
+.coordinate-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+
+/* ---------- 4. Measurements & plots ---------- */
+.metrics { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.metrics div { flex: 1 1 120px; min-width: max-content; padding: 8px 10px; border-right: 1px solid var(--line); white-space: nowrap; }
+.metrics div:last-child { border: 0; }
+.metrics span { display: block; color: var(--muted); font-size: 11px; }
+.metrics strong { font: 600 19px/1.4 ui-monospace, monospace; }
+.metrics small { margin-left: 4px; color: var(--muted); }
+
+.display-controls { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.toolbar label { width: 110px; }
+.toolbar .check { width: auto; min-height: 32px; }
+
+.plot-block { margin-top: 10px; }
+.plot-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.plot-controls { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: 6px; }
+.series-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.series-controls label, .check { display: flex; align-items: center; gap: 6px; }
+.series-controls label { font-weight: 600; }
+.axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+.axis-grid fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.axis-grid .check { grid-column: 1 / -1; }
+#view-state { color: var(--green); font-size: 12px; }
+#view-state.paused { color: #855600; font-weight: 600; }
+canvas { display: block; width: 100%; height: var(--plot-height, 300px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+
+/* ---------- 5. Sidebar panels ---------- */
+.controls { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 3px rgba(23, 35, 33, .06); align-self: start; }
+.controls { overflow-wrap: anywhere; }
+.controls section + section { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.control-panel { margin-top: 0; }
+.control-panel > summary { display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; list-style: none; padding: 2px 0; color: var(--ink); }
+.control-panel > summary::-webkit-details-marker { display: none; }
+.control-panel > summary > h2 { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.control-panel > summary::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .15s; }
+.control-panel[open] > summary { margin-bottom: 8px; }
+.control-panel[open] > summary::before { transform: rotate(90deg); }
+/* State label on the right of the header (e.g. "Idle", "Revision 1") */
+.control-panel > summary > span {
+  margin-left: auto; padding: 1px 8px; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: #edf2ef; color: var(--muted); font: 600 10.5px system-ui, sans-serif; letter-spacing: .02em;
+}
+
 #experiment-form { margin-top: 8px; }
 #experiment-form .coordinate-row { grid-template-columns: 1fr 1fr; }
+#experiment-stop { margin-top: 8px; }
+#radio-fields { display: grid; gap: 8px; }
+#radio-refresh { margin-top: 8px; }
+#radio-state { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* ---------- 6. Info button (square "i" with hover/focus tooltip) ---------- */
+.info {
+  position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px;
+  min-width: 0; min-height: 0; padding: 0; margin-left: 6px; line-height: 1; vertical-align: middle;
+  border: 1px solid #aab8b1; border-radius: 3px; background: #edf2ef; color: var(--muted);
+  font: 700 10px ui-monospace, monospace; text-transform: none; letter-spacing: normal; cursor: help;
+}
+.info:hover, .info:focus-visible { background: #dce7e1; color: var(--ink); }
+.info:hover::after, .info:focus::after {
+  content: attr(data-tip); position: absolute; z-index: 10; top: 20px; right: -8px; width: 240px;
+  padding: 8px; border-radius: 6px; background: #1f2937; color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  font: 400 11px/1.4 system-ui, sans-serif; text-align: left; white-space: normal;
+}
+/* In a panel header: far right, after the state label */
+.control-panel > summary > .info { order: 99; margin-left: 8px; }
+.control-panel > summary > h2 + .info:last-child { margin-left: auto; }
+/* In a field label: pinned to the label's right end */
+label:has(> .info) { position: relative; }
+label > .info { position: absolute; top: 0; right: 0; margin: 0; }
+
+/* ---------- 7. Calibration assistant ---------- */
+#calibration-panel form { gap: 10px; }
+#calibration-panel label { font-size: 11px; font-weight: 600; white-space: nowrap; }
+#calibration-panel .coordinate-row { grid-template-columns: 1fr 1fr; align-items: end; gap: 8px; }
+.calibration-actions { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 6px; }
+.calibration-actions button { min-width: 0; padding: 5px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#calibration-start, #calibration-apply { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+#calibration-start:hover:not(:disabled), #calibration-apply:hover:not(:disabled) { background: #066648; }
+#calibration-apply { width: 100%; margin-top: 10px; padding: 5px 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.calibration-table { width: 100%; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; border-collapse: separate; border-spacing: 0; overflow: hidden; font-size: 10.5px; white-space: nowrap; }
+.calibration-table th, .calibration-table td { padding: 4px; text-align: right; border-bottom: 1px solid #e5e7eb; }
+.calibration-table th:first-child { text-align: left; }
+.calibration-table thead th { background: #f5f8f6; color: var(--muted); font-weight: 600; }
+.calibration-table tbody th { color: var(--ink); font-weight: 600; }
+.calibration-table tbody tr:first-child th { color: var(--blue); }
+.calibration-table td { font-family: ui-monospace, monospace; }
+.calibration-table tbody tr:last-child th, .calibration-table tbody tr:last-child td { border-bottom: 0; }
+.calibration-counts { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.calibration-counts b { color: var(--ink); font-family: ui-monospace, monospace; }
+.calibration-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
+#calibration-recommendation { padding: 8px 10px; border-left: 3px solid var(--blue); border-radius: 0 var(--radius) var(--radius) 0; background: #eef5f8; color: var(--ink); }
+#calibration-hardware { padding-left: 2px; }
+
+/* ---------- 8. Noise analysis ---------- */
+.analysis-panel { background: var(--panel); border: 1px solid var(--line); padding: 10px; margin-bottom: 10px; }
+.analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
 .analysis-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
-.analysis-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.analysis-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.analysis-card h3 { font-size: 14px; margin: 0; }
-.analysis-badge { border: 1px solid #dfe6e2; border-radius: 12px; padding: 3px 8px; color: var(--muted); background: #f5f8f6; font-size: 11px; font-variant-numeric: tabular-nums; }
-.analysis-badge--method { background: #edf5f8; border-color: #c8dde5; color: var(--blue); font-weight: 600; }
 .analysis-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; }
 .analysis-context > .plot-note, .analysis-context > details { margin: 0; }
 .analysis-context > details { font-size: 11px; }
 .analysis-context > details[open] { flex-basis: 100%; }
 #analysis-provenance { overflow-wrap: anywhere; }
-.analysis-card canvas { height: 220px; margin-top: 10px; border-radius: 5px; }
+
+.analysis-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.analysis-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.analysis-card h3 { font-size: 14px; margin: 0; }
+.analysis-card canvas { height: 220px; margin-top: 10px; border-radius: var(--radius); }
+.analysis-badge { border: 1px solid #dfe6e2; border-radius: 12px; padding: 3px 8px; color: var(--muted); background: #f5f8f6; font-size: 11px; font-variant-numeric: tabular-nums; }
+.analysis-badge--method { background: #edf5f8; border-color: #c8dde5; color: var(--blue); font-weight: 600; }
+.analysis-notice { margin-bottom: 10px; padding: 8px; border-radius: var(--radius); background: #fff4dc; color: #775019; font-size: 12px; overflow-wrap: anywhere; }
+
 .analysis-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
 .analysis-metrics .metric-tile { display: grid; flex: 1 1 120px; align-content: start; gap: 5px; min-width: max-content; padding: 10px; border: 1px solid #e1e8e4; border-radius: 6px; background: #f5f8f6; }
 .analysis-metrics .metric-tile--primary { flex-basis: 100%; padding: 12px; border-color: #c8dde5; border-left: 3px solid var(--blue); background: #edf5f8; }
@@ -138,15 +200,17 @@ dd { margin: 0; font: 600 13px ui-monospace, monospace; }
 .metric-tile--primary strong { color: var(--blue); font-size: 30px; }
 .analysis-card[data-method="gmm"] .metric-value strong { font-size: 16px; }
 .metric-unit { color: var(--muted); font-size: 11px; }
-.analysis-notice { margin-bottom: 10px; padding: 8px; border-radius: 5px; background: #fff4dc; color: #775019; font-size: 12px; overflow-wrap: anywhere; }
 .analysis-method-details { padding-top: 8px; border-top: 1px solid #e1e8e4; }
 .analysis-method-details > summary { font-size: 11px; }
 .analysis-method-details .plot-note { margin-top: 8px; }
+
+.comparison-title { margin-top: 14px; }
+.table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
 .analysis-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .analysis-table th, .analysis-table td { padding: 6px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .analysis-table th { color: var(--muted); font-weight: 500; }
-.table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
-.comparison-title { margin-top: 14px; }
+
+/* ---------- 9. Responsive ---------- */
 @media (max-width: 1150px) { .analysis-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }

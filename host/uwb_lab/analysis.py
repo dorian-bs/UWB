@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
@@ -14,9 +15,20 @@ from sklearn.mixture import GaussianMixture
 
 METHODS = {
     "statistics": {"label": "Residual statistics", "parameters": []},
-    "histogram": {"label": "Histogram + Gaussian", "parameters": ["histogram_bins"]},
-    "psd": {"label": "Spectrum / PSD", "parameters": []},
-    "gmm": {"label": "Gaussian mixture", "parameters": ["components", "seed"]},
+    "distribution": {
+        "label": "Histogram + distribution fit",
+        "parameters": ["fit", "histogram_bins", "components", "seed"],
+    },
+    "psd": {"label": "Spectrum / PSD (all runs)", "parameters": []},
+}
+
+FITS = {
+    "gaussian": "Gaussian",
+    "gmm": "Gaussian mixture",
+    "lognormal": "Log-normal (shifted)",
+    "student_t": "Student-t",
+    "laplace": "Laplace",
+    "skew_normal": "Skew-normal",
 }
 
 SpectrumRun = tuple[str, NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]
@@ -30,9 +42,10 @@ class AnalysisRequest(BaseModel):
     run_id: str | None = None
     mode: Literal["cumulative", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
-    methods: list[Literal["statistics", "histogram", "psd", "gmm"]] = Field(
+    methods: list[Literal["statistics", "distribution", "psd"]] = Field(
         default_factory=lambda: list(METHODS)
     )
+    fit: Literal["gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"] = "gaussian"
     histogram_bins: int = Field(default=30, ge=1, le=200, strict=True)
     components: int = Field(default=2, ge=1, le=6, strict=True)
     seed: int = Field(default=0, ge=0, le=2**32 - 1, strict=True)
@@ -87,6 +100,7 @@ class Plot(ResultModel):
 
 
 class Table(ResultModel):
+    title: str = ""
     columns: list[str]
     rows: list[list[str | float | int | None]]
 
@@ -172,34 +186,174 @@ def describe(values: NDArray[np.float64]) -> AnalysisResult:
     return AnalysisResult(metrics=metrics)
 
 
-def histogram(values: NDArray[np.float64], bins: int) -> AnalysisResult:
+@dataclass
+class Candidate:
+    label: str
+    parameters: list[tuple[str, float]]
+    log_likelihood: float
+    pdf: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    cdf: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    components: list[list[float]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def k(self) -> int:
+        return len(self.parameters)
+
+
+SCIPY_FITS = {
+    "gaussian": (stats.norm, ["Mean (m)", "Spread (m)"]),
+    "lognormal": (stats.lognorm, ["Shape", "Shift (m)", "Scale (m)"]),
+    "student_t": (stats.t, ["Degrees of freedom", "Location (m)", "Scale (m)"]),
+    "laplace": (stats.laplace, ["Location (m)", "Scale (m)"]),
+    "skew_normal": (stats.skewnorm, ["Shape", "Location (m)", "Scale (m)"]),
+}
+
+
+def _scipy_candidate(name: str, values: NDArray[np.float64]) -> Candidate | None:
+    dist, names = SCIPY_FITS[name]
+    with warnings.catch_warnings(), np.errstate(all="ignore"):
+        warnings.simplefilter("ignore")
+        if name == "lognormal":
+            spread = float(np.std(values))
+            params = dist.fit(values, 1.0, loc=float(values.min()) - spread, scale=spread)
+        else:
+            params = dist.fit(values)
+        log_likelihood = float(np.sum(dist.logpdf(values, *params)))
+    if not np.isfinite(log_likelihood):
+        return None
+    return Candidate(
+        label=FITS[name],
+        parameters=[(label, float(value)) for label, value in zip(names, params, strict=True)],
+        log_likelihood=log_likelihood,
+        pdf=lambda grid: dist.pdf(grid, *params),
+        cdf=lambda grid: dist.cdf(grid, *params),
+    )
+
+
+def _gmm_candidate(values: NDArray[np.float64], components: int, seed: int) -> Candidate | str:
+    if len(values) < max(10, 5 * components) or len(np.unique(values)) < max(2, components):
+        return "Too few samples or distinct values for this mixture"
+    model = GaussianMixture(
+        n_components=components,
+        covariance_type="full",
+        random_state=seed,
+        n_init=5,
+        reg_covar=1e-10,
+        max_iter=500,
+    )
+    matrix = values.reshape(-1, 1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        model.fit(matrix)
+    if not model.converged_:
+        return "Mixture did not converge"
+    order = np.argsort(model.means_.ravel())
+    rows = [
+        [float(model.weights_[i]), float(model.means_.ravel()[i]), float(np.sqrt(model.covariances_.ravel()[i]))]
+        for i in order
+    ]
+
+    def pdf(grid: NDArray[np.float64]) -> NDArray[np.float64]:
+        return sum(w * stats.norm.pdf(grid, m, s) for w, m, s in rows)
+
+    def cdf(grid: NDArray[np.float64]) -> NDArray[np.float64]:
+        return sum(w * stats.norm.cdf(grid, m, s) for w, m, s in rows)
+
+    return Candidate(
+        label=f"{FITS['gmm']} ({components})",
+        parameters=[(f"{name} {i + 1}", row[j]) for i, row in enumerate(rows) for j, name in enumerate(("w", "m", "s"))],
+        log_likelihood=float(model.score(matrix)) * len(values),
+        pdf=pdf,
+        cdf=cdf,
+        components=rows,
+        notes=[str(item.message) for item in caught],
+    )
+
+
+def distribution_fit(
+    values: NDArray[np.float64], bins: int, fit: str, components: int, seed: int
+) -> AnalysisResult:
     if not len(values):
         return AnalysisResult(status="unavailable", reason="No eligible residuals")
     density, edges = np.histogram(values, bins=bins, density=True)
-    series = [
-        Series(
-            label="Empirical density",
-            x=((edges[:-1] + edges[1:]) / 2).tolist(),
-            y=density.tolist(),
-            style="bars",
+    bars = Series(
+        label="Empirical density",
+        x=((edges[:-1] + edges[1:]) / 2).tolist(),
+        y=density.tolist(),
+        style="bars",
+    )
+    plot_labels = {"x_label": "Residual (m)", "y_label": "Density (1/m)"}
+    if float(np.std(values)) == 0:
+        return AnalysisResult(
+            warnings=["Constant residuals: no distribution can be fitted"],
+            plots=[Plot(series=[bars], **plot_labels)],
         )
-    ]
-    mean, std = stats.norm.fit(values)
-    notices = []
-    if std == 0:
-        notices.append("Constant residuals: Gaussian density is degenerate and is not drawn")
-    else:
-        grid = np.linspace(min(edges[0], mean - 4 * std), max(edges[-1], mean + 4 * std), 250)
-        series.append(
-            Series(label="Gaussian baseline", x=grid.tolist(), y=stats.norm.pdf(grid, mean, std).tolist())
+    if len(values) < 10 or len(np.unique(values)) < 2:
+        return AnalysisResult(status="unavailable", reason="Too few samples or distinct values for a fit")
+
+    candidates: dict[str, Candidate] = {}
+    skipped: list[str] = []
+    for name in FITS:
+        if name == "gmm":
+            outcome = _gmm_candidate(values, components, seed)
+            if isinstance(outcome, str):
+                skipped.append(f"{FITS[name]}: {outcome}")
+            else:
+                candidates[name] = outcome
+        else:
+            outcome = _scipy_candidate(name, values)
+            if outcome is None:
+                skipped.append(f"{FITS[name]}: fit failed")
+            else:
+                candidates[name] = outcome
+    if fit not in candidates:
+        reason = next((note for note in skipped if note.startswith(FITS[fit])), f"{FITS[fit]}: fit failed")
+        return AnalysisResult(status="failed", reason=reason)
+
+    count = len(values)
+    mean, std = float(np.mean(values)), float(np.std(values))
+    grid = np.linspace(min(edges[0], mean - 4 * std), max(edges[-1], mean + 4 * std), 300)
+    chosen = candidates[fit]
+    series = [bars, Series(label=chosen.label, x=grid.tolist(), y=chosen.pdf(grid).tolist())]
+    if chosen.components:
+        for index, (weight, mu, sigma) in enumerate(chosen.components, start=1):
+            curve = weight * stats.norm.pdf(grid, mu, sigma)
+            series.append(Series(label=f"Component {index}", x=grid.tolist(), y=curve.tolist()))
+
+    def criteria(candidate: Candidate) -> tuple[float, float, float]:
+        aic = 2 * candidate.k - 2 * candidate.log_likelihood
+        bic = candidate.k * math.log(count) - 2 * candidate.log_likelihood
+        ks = float(stats.kstest(values, candidate.cdf).statistic)
+        return aic, bic, ks
+
+    aic, bic, ks = criteria(chosen)
+    comparison = sorted(
+        ([candidate.label, *criteria(candidate)] for candidate in candidates.values()),
+        key=lambda row: row[1],
+    )
+    parameter_table = (
+        Table(title="Components", columns=["Weight", "Mean (m)", "Spread (m)"], rows=chosen.components)
+        if chosen.components
+        else Table(
+            title="Parameters",
+            columns=["Parameter", "Value"],
+            rows=[[name, value] for name, value in chosen.parameters],
         )
+    )
     return AnalysisResult(
-        warnings=notices,
+        warnings=chosen.notes + skipped,
         metrics=[
-            Metric(key="mean_m", label="Gaussian mean", value=float(mean), unit="m"),
-            Metric(key="sigma_m", label="Gaussian MLE spread", value=float(std), unit="m"),
+            Metric(key="log_likelihood", label="Mean log likelihood", value=chosen.log_likelihood / count),
+            Metric(key="aic", label="AIC", value=aic),
+            Metric(key="bic", label="BIC", value=bic),
+            Metric(key="ks", label="KS distance", value=ks),
         ],
-        plots=[Plot(x_label="Residual (m)", y_label="Density (1/m)", series=series)],
+        tables=[
+            parameter_table,
+            Table(title="Compare models", columns=["Model", "AIC", "BIC", "KS distance"], rows=comparison),
+        ],
+        plots=[Plot(series=series, **plot_labels)],
     )
 
 
@@ -209,18 +363,21 @@ def power_spectrum(
     return pooled_power_spectrum([("Run", values, time_ms, seq)])
 
 
-def pooled_power_spectrum(
-    runs: list[SpectrumRun],
-) -> AnalysisResult:
-    if not runs:
+def pooled_power_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
+    usable = [run for run in runs if len(run[1]) >= 32]
+    if not usable:
         return AnalysisResult(status="unavailable", reason="PSD needs at least 32 eligible samples per run")
+    result = _pooled_spectrum(usable)
+    if result.status == "ok" and len(usable) < len(runs):
+        short = ", ".join(run_id for run_id, values, _, _ in runs if len(values) < 32)
+        result.warnings.insert(0, f"Skipped runs with fewer than 32 eligible samples: {short}")
+    return result
+
+
+def _pooled_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
     deltas = []
     regular = True
     for run_id, values, time_ms, seq in runs:
-        if len(values) < 32:
-            return AnalysisResult(
-                status="unavailable", reason=f"{run_id}: PSD needs at least 32 eligible samples per run"
-            )
         reason = None
         delta = np.diff(time_ms.astype(float))
         median = float(np.median(delta))
@@ -328,53 +485,4 @@ def _lomb_scargle_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
                 ],
             )
         ],
-    )
-
-
-def fit_gmm(values: NDArray[np.float64], components: int, seed: int) -> AnalysisResult:
-    if len(values) < max(10, 5 * components) or len(np.unique(values)) < max(2, components):
-        return AnalysisResult(status="unavailable", reason="Too few samples or distinct values for this GMM")
-    model = GaussianMixture(
-        n_components=components,
-        covariance_type="full",
-        random_state=seed,
-        n_init=5,
-        reg_covar=1e-10,
-        max_iter=500,
-    )
-    matrix = values.reshape(-1, 1)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", ConvergenceWarning)
-        model.fit(matrix)
-    if not model.converged_:
-        return AnalysisResult(status="failed", reason="GMM did not converge")
-    means = model.means_.ravel()
-    spreads = np.sqrt(model.covariances_.ravel())
-    order = np.argsort(means)
-    grid = np.linspace(
-        float(min(values.min(), np.min(means - 4 * spreads))),
-        float(max(values.max(), np.max(means + 4 * spreads))),
-        300,
-    )
-    curves = []
-    total = np.zeros_like(grid)
-    rows = []
-    for index in order:
-        weight, mean, std = float(model.weights_[index]), float(means[index]), float(spreads[index])
-        density = weight * stats.norm.pdf(grid, mean, std)
-        total += density
-        rows.append([weight, mean, std])
-        curves.append(Series(label=f"Component {len(rows)}", x=grid.tolist(), y=density.tolist()))
-    curves.insert(0, Series(label="Mixture density", x=grid.tolist(), y=total.tolist()))
-    return AnalysisResult(
-        warnings=[str(item.message) for item in caught]
-        + ["Exploratory components are not LOS/NLOS labels; covariance regularization = 1e-10 m^2"],
-        metrics=[
-            Metric(key="aic", label="AIC", value=float(model.aic(matrix))),
-            Metric(key="bic", label="BIC", value=float(model.bic(matrix))),
-            Metric(key="log_likelihood", label="Mean log likelihood", value=float(model.score(matrix))),
-            Metric(key="converged", label="Converged", value=1),
-        ],
-        tables=[Table(columns=["Weight", "Mean (m)", "Spread (m)"], rows=rows)],
-        plots=[Plot(x_label="Residual (m)", y_label="Density (1/m)", series=curves)],
     )

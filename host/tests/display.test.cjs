@@ -314,15 +314,15 @@ test("pause freezes data through arrivals and snapshots; resume shows latest dat
 
 test("dashboard markup includes antenna-delay calibration assistant panel", () => {
   const html = fs.readFileSync(require.resolve("../uwb_lab/static/index.html"), "utf8");
-  assert.match(html, /Antenna-delay calibration assistant/);
+  assert.match(html, /Calibration assistant/);
   assert.match(html, /id="calibration-panel"/);
   assert.match(html, /id="calibration-form"/);
   assert.match(
     html,
-    /Valid for controlled fixed-LOS real-hardware captures; not for demo\/replay\./,
+    /fixed-LOS captures on real hardware \(not demo\/replay\)/,
   );
   assert.match(html, /id="calibration-apply"[^>]*disabled/);
-  assert.match(html, /Settings last until each board restarts/);
+  assert.match(html, /Delays last until restart/);
 });
 
 test("dashboard wires hardware capture, server preview, apply and reset without client-side offsets", async () => {
@@ -399,7 +399,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
   await ticks[0]();
   assert.equal(byId("calibration-captured").textContent, "3");
   assert.equal(byId("calibration-apply").disabled, false);
-  assert.match(byId("calibration-hardware").textContent, /\+10 DTU/);
+  assert.match(byId("calibration-recommendation").textContent, /\+10 DTU/);
   rejected = true;
   await byId("calibration-apply").events.click();
   assert.match(byId("calibration-error").textContent, /Board settings changed/);
@@ -407,7 +407,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
   await byId("calibration-apply").events.click();
   assert.deepEqual(posts.at(-1), ["/api/calibration/apply", {id: "verified-capture"}]);
   assert.equal(byId("calibration-apply").disabled, true);
-  assert.match(byId("calibration-hardware").textContent, /acknowledged/);
+  assert.match(byId("calibration-recommendation").textContent, /acknowledged/);
   await byId("calibration-reset").events.click();
   assert.equal(byId("calibration-captured").textContent, "0");
   assert.equal(byId("calibration-apply").disabled, true);

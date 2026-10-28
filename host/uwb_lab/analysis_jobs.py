@@ -18,8 +18,7 @@ from .analysis import (
     AnalysisRequest,
     AnalysisSample,
     describe,
-    fit_gmm,
-    histogram,
+    distribution_fit,
     pooled_power_spectrum,
 )
 from .core import utc_now, write_json_atomic
@@ -27,7 +26,7 @@ from .experiments import BatchRunner
 from .radio import _settle
 
 logger = logging.getLogger(__name__)
-ANALYSIS_VERSION = "noise-3"
+ANALYSIS_VERSION = "noise-4"
 
 
 class AnalysisService:
@@ -44,14 +43,18 @@ class AnalysisService:
         if self.closing:
             raise ValueError("Analysis service is shutting down")
         batch = self.runner.load_batch(request.batch_id)
-        runs = [run for run in batch["runs"] if run.get("session")]
+        all_runs = [run for run in batch["runs"] if run.get("session")]
+        runs = all_runs
         if request.scope == "run":
             runs = [run for run in runs if run["run_id"] == request.run_id]
         elif request.scope == "current":
             runs = runs[-1:]
         if not runs:
             raise ValueError("No recorded run matches this selection")
-        if request.mode == "full" and any(run["state"] == "recording" for run in runs):
+        # The spectrum always pools every recorded run of the batch, whatever the scope.
+        spectrum_runs = all_runs if "psd" in request.methods else []
+        involved = [run for run in all_runs if run in runs or run in spectrum_runs]
+        if request.mode == "full" and any(run["state"] == "recording" for run in involved):
             raise ValueError("Full-data analysis requires closed runs")
         recipe = request.model_dump()
         key = hashlib.sha256(
@@ -59,6 +62,7 @@ class AnalysisService:
                 {
                     "recipe": recipe,
                     "runs": [(run["run_id"], run["state"]) for run in runs],
+                    "spectrum_runs": [(run["run_id"], run["state"]) for run in spectrum_runs],
                     "batch_outcome": batch["outcome"],
                 },
                 sort_keys=True,
@@ -70,7 +74,7 @@ class AnalysisService:
                 return self.jobs[old_id]
         directory = self.runner.batch_path(request.batch_id)
         sources = []
-        for run in runs:
+        for run in involved:
             path = (directory / run["session"] / "telemetry.ndjson").resolve()
             if not path.is_relative_to(directory.resolve()):
                 raise ValueError("Recorded session path escapes the experiment")
@@ -91,6 +95,7 @@ class AnalysisService:
                 "request": request,
                 "batch": batch,
                 "runs": runs,
+                "spectrum_ids": {run["run_id"] for run in spectrum_runs},
                 "directory": directory,
                 "sources": sources,
             },
@@ -163,18 +168,28 @@ class AnalysisService:
         digest = hashlib.sha256()
         revisions: set[int] = set()
         collected: list[tuple[str, AnalysisSample]] = []
+        spectrum_samples: list[tuple[str, AnalysisSample]] = []
+        scoped_ids = {run["run_id"] for run in snapshot["runs"]}
 
         def collect(run_id: str, raw: dict[str, Any]) -> None:
             sample = AnalysisSample.model_validate(raw)
+            in_scope = run_id in scoped_ids
+            reason = None
             if not sample.valid:
-                excluded["invalid"] += 1
+                reason = "invalid"
             elif sample.expected_m is None:
-                excluded["missing_prior"] += 1
+                reason = "missing_prior"
             elif not all(
                 math.isfinite(value) for value in (sample.raw_m, sample.corrected_m, sample.expected_m)
             ):
-                excluded["nonfinite"] += 1
-            else:
+                reason = "nonfinite"
+            if reason:
+                if in_scope:
+                    excluded[reason] += 1
+                return
+            if run_id in snapshot["spectrum_ids"]:
+                spectrum_samples.append((run_id, sample))
+            if in_scope:
                 if sample.prior_revision is not None:
                     revisions.add(sample.prior_revision)
                 collected.append((run_id, sample))
@@ -190,7 +205,7 @@ class AnalysisService:
                     digest.update(line)
                     collect(run_id, json.loads(line))
         grouped: dict[str, list[AnalysisSample]] = {}
-        for run_id, sample in collected:
+        for run_id, sample in spectrum_samples:
             grouped.setdefault(run_id, []).append(sample)
 
         def arrays(samples: list[AnalysisSample]):
@@ -208,10 +223,10 @@ class AnalysisService:
         for method in dict.fromkeys(request.methods):
             if method == "statistics":
                 result = describe(values)
-            elif method == "histogram":
-                result = histogram(values, request.histogram_bins)
-            elif method == "gmm":
-                result = fit_gmm(values, request.components, request.seed)
+            elif method == "distribution":
+                result = distribution_fit(
+                    values, request.histogram_bins, request.fit, request.components, request.seed
+                )
             else:
                 result = pooled_power_spectrum(
                     [(run_id, *arrays(samples)) for run_id, samples in grouped.items()]
@@ -233,6 +248,7 @@ class AnalysisService:
                 "batch_id": request.batch_id,
                 "batch_outcome": snapshot["batch"]["outcome"],
                 "runs": [{"run_id": run["run_id"], "state": run["state"]} for run in snapshot["runs"]],
+                "spectrum_runs": sorted(snapshot["spectrum_ids"]),
                 "source_sha256": digest.hexdigest(),
                 "prior_revisions": sorted(revisions),
                 "field": request.field,

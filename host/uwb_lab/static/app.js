@@ -407,8 +407,11 @@ function startDashboard() {
       input.disabled = capturing || calibrationSubmitting;
     });
     byId("calibration-apply").disabled = calibrationSubmitting || !streamOpen || !hardware.canApply;
-    byId("calibration-hardware").textContent = calibrationSubmitting
-      ? "Waiting for host confirmation..." : hardware.message;
+    // With a remote capture the same message is already shown as the recommendation.
+    const hardwareNote = calibrationSubmitting
+      ? "Waiting for host confirmation..." : remote ? "" : hardware.message;
+    byId("calibration-hardware").textContent = hardwareNote;
+    byId("calibration-hardware").hidden = !hardwareNote;
   }
 
   function drawChart(canvas, samples, settings) {
