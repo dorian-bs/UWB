@@ -54,16 +54,37 @@ def test_summary_and_running_moments():
 def test_distribution_degenerate_inputs_and_retired_acf():
     import numpy as np
 
-    from uwb_lab.analysis import METHODS, AnalysisRequest, histogram
+    from uwb_lab.analysis import METHODS, AnalysisRequest, distribution_fit
 
     assert "acf" not in METHODS
     with pytest.raises(ValidationError):
         AnalysisRequest(batch_id="batch-a", methods=["acf"])
-    constant = histogram(np.ones(40), 10)
+    constant = distribution_fit(np.ones(40), 10, "gaussian", 2, 0)
     assert constant.warnings
     json.dumps(constant.model_dump(), allow_nan=False)
-    normal = histogram(np.random.default_rng(4).normal(size=1000), 20)
+    normal = distribution_fit(np.random.default_rng(4).normal(size=1000), 20, "gaussian", 2, 0)
     assert len(normal.plots[0].series) == 2
+    assert normal.status == "ok"
+
+
+def test_every_distribution_fit_draws_histogram_plus_curve_and_compares_models():
+    import numpy as np
+
+    from uwb_lab.analysis import FITS, distribution_fit
+
+    values = np.random.default_rng(8).gamma(4.0, 0.01, 1500) - 0.04
+    for name in FITS:
+        result = distribution_fit(values, 25, name, 2, 0)
+        assert result.status == "ok", (name, result.reason)
+        assert result.plots[0].series[0].style == "bars"
+        assert result.plots[0].series[1].label.startswith(FITS[name].split(" (")[0])
+        assert {metric.key for metric in result.metrics} == {"log_likelihood", "aic", "bic", "ks"}
+        json.dumps(result.model_dump(), allow_nan=False)
+    comparison = result.tables[1]
+    assert len(comparison.rows) == len(FITS)
+    aics = [row[1] for row in comparison.rows]
+    assert aics == sorted(aics)
+    assert comparison.rows[0][0].startswith("Log-normal") or comparison.rows[0][0].startswith("Skew")
 
 
 def test_psd_recovers_device_timed_tone_and_checks_thresholds():
@@ -221,13 +242,14 @@ def test_gapped_spectrum_handles_constants_but_still_rejects_resets_and_short_ru
 def test_gmm_recovers_seeded_components():
     import numpy as np
 
-    from uwb_lab.analysis import fit_gmm
+    from uwb_lab.analysis import distribution_fit
 
     rng = np.random.default_rng(123)
     values = np.concatenate([rng.normal(-0.04, 0.005, 1500), rng.normal(0.06, 0.008, 500)])
-    result = fit_gmm(values, 2, 0)
+    result = distribution_fit(values, 30, "gmm", 2, 0)
     assert result.status == "ok"
+    assert result.tables[0].title == "Components"
     np.testing.assert_allclose([row[1] for row in result.tables[0].rows], [-0.04, 0.06], atol=0.003)
     np.testing.assert_allclose([row[0] for row in result.tables[0].rows], [0.75, 0.25], atol=0.03)
-    assert fit_gmm(np.ones(20), 2, 0).status == "unavailable"
+    assert distribution_fit(np.arange(5.0), 5, "gmm", 2, 0).status == "unavailable"
     json.dumps(result.model_dump(), allow_nan=False)

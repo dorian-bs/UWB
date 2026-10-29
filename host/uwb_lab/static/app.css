@@ -13,12 +13,15 @@
   --red: #b63036;
   --blue: #176b87;
   --radius: 5px;
+  --radius-lg: 8px;
+  --shadow: 0 1px 3px rgba(23, 35, 33, .06);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; color: var(--ink); background: var(--paper); font: 13px/1.4 system-ui, sans-serif; }
 h1, h2, p { margin: 0; }
-h1 { font-size: 19px; }
+h1 { font-size: 19px; letter-spacing: -.01em; }
+h1::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 2px; background: var(--green); position: relative; top: -3px; }
 h2 { font-size: 14px; }
 details { margin-top: 8px; }
 summary { cursor: pointer; color: var(--muted); }
@@ -43,7 +46,7 @@ dd { margin: 0; font: 600 13px ui-monospace, monospace; }
 .spread { color: #087f5b; }
 
 /* ---------- 2. Layout ---------- */
-.topbar { padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.topbar { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .connection { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
 .status-dot.connected { background: var(--green); }
@@ -65,6 +68,7 @@ input[type="checkbox"] { width: 15px; height: 15px; min-height: 0; margin: 0; ac
 .check input { width: auto; }
 button { padding: 5px 10px; background: #edf2ef; color: var(--ink); cursor: pointer; }
 button:hover { background: #dce7e1; }
+button, input, select { transition: background-color .12s, border-color .12s; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 button[aria-pressed="true"] { background: #fff0cc; border-color: #9b6900; }
 fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
@@ -78,34 +82,37 @@ button.stop { background: var(--red); border-color: var(--red); }
 .coordinate-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
 
 /* ---------- 4. Measurements & plots ---------- */
-.metrics { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.metrics { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow); overflow: hidden; }
 .metrics div { flex: 1 1 120px; min-width: max-content; padding: 8px 10px; border-right: 1px solid var(--line); white-space: nowrap; }
 .metrics div:last-child { border: 0; }
 .metrics span { display: block; color: var(--muted); font-size: 11px; }
 .metrics strong { font: 600 19px/1.4 ui-monospace, monospace; }
 .metrics small { margin-left: 4px; color: var(--muted); }
 
-.display-controls { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.display-controls { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow); }
 .toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .toolbar label { width: 110px; }
 .toolbar .check { width: auto; min-height: 32px; }
 
 .plot-block { margin-top: 10px; }
 .plot-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-.plot-controls { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: 6px; }
+.plot-controls { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; box-shadow: var(--shadow); }
 .series-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .series-controls label, .check { display: flex; align-items: center; gap: 6px; }
 .series-controls label { font-weight: 600; }
-.axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+.plot-view-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; }
+.axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0 8px; }
 .axis-grid fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .axis-grid .check { grid-column: 1 / -1; }
 #view-state { color: var(--green); font-size: 12px; }
 #view-state.paused { color: #855600; font-weight: 600; }
-canvas { display: block; width: 100%; height: var(--plot-height, 300px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+canvas { display: block; width: 100%; height: var(--plot-height, 300px); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.plot-controls + canvas { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 
 /* ---------- 5. Sidebar panels ---------- */
-.controls { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 3px rgba(23, 35, 33, .06); align-self: start; }
+.controls { padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); align-self: start; }
 .controls { overflow-wrap: anywhere; }
+#toggle-controls { display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0 0 3px; border: 0; font-size: 20px; line-height: 1; }
 .controls section + section { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .control-panel { margin-top: 0; }
 .control-panel > summary { display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; list-style: none; padding: 2px 0; color: var(--ink); }
@@ -117,22 +124,40 @@ canvas { display: block; width: 100%; height: var(--plot-height, 300px); backgro
 /* State label on the right of the header (e.g. "Idle", "Revision 1") */
 .control-panel > summary > span {
   margin-left: auto; padding: 1px 8px; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis;
-  border: 1px solid var(--line); border-radius: 3px;
+  border-radius: 3px;
   background: #edf2ef; color: var(--muted); font: 600 10.5px system-ui, sans-serif; letter-spacing: .02em;
 }
 
 #experiment-form { margin-top: 8px; }
 #experiment-form .coordinate-row { grid-template-columns: 1fr 1fr; }
-#experiment-stop { margin-top: 8px; }
+.batch-actions { display: flex; gap: 6px; }
+#batch-progress .section-title { align-items: center; margin-bottom: 4px; }
+#batch-progress .section-title span { margin-left: auto; }
+.batch-actions button { min-height: 26px; padding: 2px 10px; }
+#batch-progress progress { margin: 4px 0; }
+#batch-progress { display: grid; gap: 4px; }
+#batch-progress .plot-note { margin: 0; }
 #radio-fields { display: grid; gap: 8px; }
 #radio-refresh { margin-top: 8px; }
 #radio-state { white-space: pre-line; overflow-wrap: anywhere; }
+
+.subsection { margin: 10px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+.subsection:first-of-type { margin-top: 0; }
+.recording-form { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.recording-form input { width: 130px; }
+.recording-form span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recording-form button { white-space: nowrap; }
+
+/* Geometry prior: distance and uncertainty share a row */
+#prior-form { grid-template-columns: 1fr 1fr; align-items: end; }
+#prior-form > * { grid-column: 1 / -1; }
+#prior-form > #distance-fields, #prior-form > label:has(input[name="uncertainty_m"]) { grid-column: auto; }
 
 /* ---------- 6. Info button (square "i" with hover/focus tooltip) ---------- */
 .info {
   position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px;
   min-width: 0; min-height: 0; padding: 0; margin-left: 6px; line-height: 1; vertical-align: middle;
-  border: 1px solid #aab8b1; border-radius: 3px; background: #edf2ef; color: var(--muted);
+  border: 0; border-radius: 3px; background: #edf2ef; color: var(--muted);
   font: 700 10px ui-monospace, monospace; text-transform: none; letter-spacing: normal; cursor: help;
 }
 .info:hover, .info:focus-visible { background: #dce7e1; color: var(--ink); }
@@ -152,7 +177,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 #calibration-panel form { gap: 10px; }
 #calibration-panel label { font-size: 11px; font-weight: 600; white-space: nowrap; }
 #calibration-panel .coordinate-row { grid-template-columns: 1fr 1fr; align-items: end; gap: 8px; }
-.calibration-actions { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 6px; }
+.calibration-actions { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 6px; }
 .calibration-actions button { min-width: 0; padding: 5px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #calibration-start, #calibration-apply { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
 #calibration-start:hover:not(:disabled), #calibration-apply:hover:not(:disabled) { background: #066648; }
@@ -161,6 +186,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .calibration-table { width: 100%; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; border-collapse: separate; border-spacing: 0; overflow: hidden; font-size: 10.5px; white-space: nowrap; }
 .calibration-table th, .calibration-table td { padding: 4px; text-align: right; border-bottom: 1px solid #e5e7eb; }
 .calibration-table th:first-child { text-align: left; }
+.calibration-table td:last-child { white-space: normal; }
 .calibration-table thead th { background: #f5f8f6; color: var(--muted); font-weight: 600; }
 .calibration-table tbody th { color: var(--ink); font-weight: 600; }
 .calibration-table tbody tr:first-child th { color: var(--blue); }
@@ -173,7 +199,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 #calibration-hardware { padding-left: 2px; }
 
 /* ---------- 8. Noise analysis ---------- */
-.analysis-panel { background: var(--panel); border: 1px solid var(--line); padding: 10px; margin-bottom: 10px; }
+.analysis-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 12px; margin-bottom: 10px; }
 .analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
 .analysis-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
@@ -185,6 +211,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 
 .analysis-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .analysis-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.analysis-card-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .analysis-card h3 { font-size: 14px; margin: 0; }
 .analysis-card canvas { height: 220px; margin-top: 10px; border-radius: var(--radius); }
 .analysis-badge { border: 1px solid #dfe6e2; border-radius: 12px; padding: 3px 8px; color: var(--muted); background: #f5f8f6; font-size: 11px; font-variant-numeric: tabular-nums; }

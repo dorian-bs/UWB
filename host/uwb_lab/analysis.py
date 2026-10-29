@@ -42,9 +42,7 @@ class AnalysisRequest(BaseModel):
     run_id: str | None = None
     mode: Literal["cumulative", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
-    methods: list[Literal["statistics", "distribution", "psd"]] = Field(
-        default_factory=lambda: list(METHODS)
-    )
+    methods: list[Literal["statistics", "distribution", "psd"]] = Field(default_factory=lambda: list(METHODS))
     fit: Literal["gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"] = "gaussian"
     histogram_bins: int = Field(default=30, ge=1, le=200, strict=True)
     components: int = Field(default=2, ge=1, le=6, strict=True)
@@ -250,7 +248,11 @@ def _gmm_candidate(values: NDArray[np.float64], components: int, seed: int) -> C
         return "Mixture did not converge"
     order = np.argsort(model.means_.ravel())
     rows = [
-        [float(model.weights_[i]), float(model.means_.ravel()[i]), float(np.sqrt(model.covariances_.ravel()[i]))]
+        [
+            float(model.weights_[i]),
+            float(model.means_.ravel()[i]),
+            float(np.sqrt(model.covariances_.ravel()[i])),
+        ]
         for i in order
     ]
 
@@ -262,12 +264,17 @@ def _gmm_candidate(values: NDArray[np.float64], components: int, seed: int) -> C
 
     return Candidate(
         label=f"{FITS['gmm']} ({components})",
-        parameters=[(f"{name} {i + 1}", row[j]) for i, row in enumerate(rows) for j, name in enumerate(("w", "m", "s"))],
+        parameters=[
+            (f"{name} {i + 1}", row[j])
+            for i, row in enumerate(rows)
+            for j, name in enumerate(("w", "m", "s"))
+        ],
         log_likelihood=float(model.score(matrix)) * len(values),
         pdf=pdf,
         cdf=cdf,
         components=rows,
-        notes=[str(item.message) for item in caught],
+        notes=["Components are exploratory, not LOS/NLOS labels; covariance regularization = 1e-10 m^2"]
+        + [str(item.message) for item in caught],
     )
 
 
@@ -377,7 +384,7 @@ def pooled_power_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
 def _pooled_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
     deltas = []
     regular = True
-    for run_id, values, time_ms, seq in runs:
+    for run_id, _values, time_ms, seq in runs:
         reason = None
         delta = np.diff(time_ms.astype(float))
         median = float(np.median(delta))

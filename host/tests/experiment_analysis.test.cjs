@@ -35,8 +35,10 @@ test("analysis preferences are independent and validate persisted methods", () =
     field:"raw_m", methods:["statistics","gmm"], window_size:100,
     histogram_bins:20, max_lag:10, components:3, seed:4,
   });
-  assert.deepEqual(preferences.methods, ["statistics","gmm"]);
+  assert.deepEqual(preferences.methods, ["statistics","distribution"]);
+  assert.equal(preferences.fit, "gmm", "legacy GMM selection becomes the GMM distribution model");
   assert.equal(preferences.components, 3);
+  assert.throws(() => validateAnalysisPreferences({...preferences, fit:"invented"}));
   assert.throws(() => validateAnalysisPreferences({...preferences, histogram_bins:201}));
   assert.throws(() => validateAnalysisPreferences({...preferences, methods:["invented"]}));
 });
@@ -112,7 +114,7 @@ test("analysis context shows shared counts once and keeps provenance in Details"
   const output = {
     included_count: 294, mode: "cumulative", excluded: {invalid: 2, missing_prior: 0},
     provenance: {runs: [{run_id: "one"}, {run_id: "two"}], batch_outcome: "completed",
-      batch_id: "batch-a", source_sha256: "abcdef123456", analysis_version: "noise-3"},
+      batch_id: "batch-a", source_sha256: "abcdef123456", analysis_version: "noise-3", spectrum_runs: ["one", "two"]},
   };
   const source = analysisSourceSummary(output, "corrected_m");
   assert.equal(source.text, "294 samples / 2 runs / Corrected residuals / 2 excluded");
@@ -121,23 +123,26 @@ test("analysis context shows shared counts once and keeps provenance in Details"
   assert.match(source.details, /abcdef123456/);
   assert.match(source.details, /noise-3/);
   assert.match(source.details, /recorded expected distance/);
+  assert.match(source.details, /spectrum pools all 2 recorded runs/);
 });
 
 test("legends retain short multi-curve names but omit redundant single-curve captions", () => {
   assert.deepEqual(analysisLegendLabels([{label: "Pooled Welch PSD"}]), []);
-  assert.deepEqual(analysisLegendLabels([{label: "Empirical density"}, {label: "Gaussian baseline"}]),
+  assert.deepEqual(analysisLegendLabels([{label: "Empirical density"}, {label: "Gaussian"}]),
     ["Samples", "Gaussian"]);
-  assert.deepEqual(analysisLegendLabels([{label: "Mixture density"}, {label: "Component 1"}, {label: "Component 2"}]),
-    ["Mixture", "C1", "C2"]);
+  assert.deepEqual(
+    analysisLegendLabels([{label: "Empirical density"}, {label: "Gaussian mixture (2)"}, {label: "Component 1"}]),
+    ["Samples", "Gaussian mixture (2)", "C1"]);
 });
 
-test("redundant GMM fit diagnostics remain available in Details", () => {
-  const summary = analysisCardSummary("gmm", [
-    {key: "aic", value: 10}, {key: "bic", value: 20},
-    {key: "log_likelihood", value: 0.5}, {key: "converged", value: 1},
+test("distribution cards show fit diagnostics directly with short labels", () => {
+  const summary = analysisCardSummary("distribution", [
+    {key: "log_likelihood", label: "Mean log likelihood", value: 0.5}, {key: "aic", label: "AIC", value: 10},
+    {key: "bic", label: "BIC", value: 20}, {key: "ks", label: "KS distance", value: 0.02},
   ]);
-  assert.deepEqual(summary.metrics.map((metric) => metric.key), ["aic", "bic"]);
-  assert.deepEqual(summary.detailMetrics.map((metric) => metric.key), ["log_likelihood", "converged"]);
+  assert.deepEqual(summary.metrics.map((metric) => metric.key), ["log_likelihood", "aic", "bic", "ks"]);
+  assert.equal(summary.metrics[0].label, "Log-lik / sample");
+  assert.equal(summary.detailMetrics, undefined);
 });
 
 test("old preferences migrate away from autocorrelation without losing other selections", () => {
@@ -246,7 +251,7 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   const timers = new Map(), recipes = [], errors = [];
   let timerId = 0, resultStatus = "ok";
   const legacyPreferences = {
-    field: "raw_m", methods: ["statistics", "histogram", "acf", "psd", "gmm"],
+    field: "raw_m", methods: ["statistics", "histogram", "acf", "psd", "gmm"], fit: "laplace",
     window_size: 2000, histogram_bins: 17, max_lag: 30, components: 3, seed: 4,
   };
   const environment = {
@@ -261,8 +266,8 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
     showError: (_, message) => { if (message) errors.push(message); },
     async request(path, options) {
       if (path === "/api/analysis/methods") return {methods: {
-        statistics: {label: "Statistics"}, histogram: {label: "Histogram"},
-        psd: {label: "Spectrum"}, gmm: {label: "Gaussian mixture"},
+        statistics: {label: "Statistics"}, distribution: {label: "Distribution fit"},
+        psd: {label: "Spectrum"},
       }};
       if (path === "/api/experiments") return {batches: []};
       if (path === "/api/experiments/batch-a") return {
@@ -280,9 +285,10 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
           results: [{method: "statistics", label: "Residual statistics", run_id: null,
             result: {status: resultStatus, reason: resultStatus === "ok" ? null : "Not enough new samples",
               metrics: [], plots: [], tables: [], warnings: []}},
-            {method: "gmm", label: "Gaussian mixture", run_id: null, result: {
-              status: "ok", metrics: [], plots: [], tables: [],
-              warnings: ["Exploratory components are not LOS/NLOS labels; covariance regularization = 1e-10 m^2",
+            {method: "distribution", label: "Distribution fit", run_id: null, result: {
+              status: "ok", metrics: [], plots: [], tables: [
+                {title: "Compare models", columns: ["Model", "AIC"], rows: [["Gaussian", 1]]}],
+              warnings: ["Components are exploratory, not LOS/NLOS labels; covariance regularization = 1e-10 m^2",
                 "Numerical fit warning"],
             }}]},
       };
@@ -298,7 +304,8 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   assert.equal(recipes[0].mode, "cumulative");
   assert.ok(!("window_size" in recipes[0]));
   assert.ok(!("max_lag" in recipes[0]));
-  assert.deepEqual(recipes[0].methods, ["statistics", "histogram", "psd", "gmm"]);
+  assert.deepEqual(recipes[0].methods, ["statistics", "distribution", "psd"]);
+  assert.equal(recipes[0].fit, "laplace");
   assert.equal(recipes[0].field, "raw_m");
   assert.equal(recipes[0].histogram_bins, 17);
   assert.equal(recipes[0].components, 3);
@@ -312,10 +319,12 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   const mixture = getElement("analysis-cards").children[1];
   assert.ok(mixture.children.some((child) => child.textContent === "Numerical fit warning"),
     "numerical warnings must stay visible, not be folded into methodology notes");
+  const header = mixture.children.find((child) => child.className === "analysis-card-header");
+  const info = header.children[0].children.find((child) => child.className === "info");
+  assert.ok(info && info.dataset.tip.startsWith("Components are exploratory"));
   const details = mixture.children.find((child) => child.className === "analysis-method-details");
-  assert.ok(details);
+  assert.ok(details, "model comparison is available behind a disclosure");
   assert.equal(details.open, false);
-  assert.ok(details.children.some((child) => child.textContent.startsWith("Exploratory components")));
   resultStatus = "unavailable";
   panel.update(status("run-0002"));
   assert.equal(getElement("analysis-cards").children[0], card);

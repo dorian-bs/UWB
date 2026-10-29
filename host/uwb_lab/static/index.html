@@ -8,26 +8,28 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>UWB Lab</h1>
-    </div>
+    <h1>UWB Lab</h1>
     <div class="connection">
       <span id="status-dot" class="status-dot"></span>
       <span id="connection-label">Connecting</span>
       <span id="source-label" class="source-label">demo</span>
-      <button id="toggle-controls" type="button" aria-expanded="true" aria-controls="experiment-controls">Hide experiment controls</button>
+      <button id="toggle-controls" type="button" aria-expanded="true" aria-controls="experiment-controls" title="Hide panel" aria-label="Hide panel">›</button>
     </div>
   </header>
 
   <main class="workspace">
     <section class="measurements">
+      <p id="recording-error" class="error" role="alert" hidden></p>
       <p id="display-warning" class="error" role="status" hidden></p>
       <section id="batch-progress" class="analysis-panel" aria-label="Experiment progress">
-        <div class="section-title"><h2>Experiment batch</h2><span id="experiment-state" role="status">No batch started</span></div>
+        <div class="section-title"><h2>Experiment batch</h2><span id="experiment-state" role="status">No batch started</span>
+          <div class="batch-actions">
+            <button id="experiment-next" type="button" hidden>Start next run</button>
+            <button id="experiment-stop" class="stop" type="button" disabled>Stop batch</button>
+          </div>
+        </div>
         <progress id="experiment-progress" max="1" value="0" aria-label="Completed experiment runs"></progress>
         <p id="experiment-timing" class="plot-note">Closing the browser does not stop a batch.</p>
-        <button id="experiment-next" type="button" hidden>Start next run</button>
-        <button id="experiment-stop" class="stop" type="button" disabled>Stop batch</button>
         <p id="experiment-error" class="error" role="alert" hidden></p>
       </section>
       <div class="metrics" aria-label="Current measurements">
@@ -40,12 +42,14 @@
 
       <section class="display-controls" aria-label="Shared display settings">
         <div class="toolbar">
-          <label>Last N samples<input id="display-count" type="number" min="10" max="2000" step="1" value="180"></label>
-          <label>Height (px)<input id="plot-height" type="number" min="180" max="600" step="10" value="300"></label>
-          <label>Draw<select id="plot-style"><option value="lines">Lines</option><option value="points">Points</option><option value="both">Lines + points</option></select></label>
           <button id="pause-view" type="button" aria-pressed="false">Pause view</button>
           <button id="reset-display" type="button">Reset display</button>
           <label class="check"><input id="secondary-plot" type="checkbox">Show Plot 2</label>
+          <form id="recording-form" class="recording-form" aria-label="Recording">
+            <input name="name" maxlength="80" value="experiment" aria-label="Session name" title="Session name">
+            <button id="record-button" type="submit">Record</button>
+            <span id="recording-state" class="source-label">Stopped</span>
+          </form>
         </div>
         <p id="settings-error" class="error" role="alert" hidden></p>
       </section>
@@ -65,7 +69,12 @@
           <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
         </fieldset>
         <details class="axis-settings">
-          <summary>Plot 1 axis limits</summary>
+          <summary>Plot 1 settings</summary>
+          <div class="plot-view-row">
+            <label>Last N samples<input id="display-count" type="number" min="10" max="2000" step="1" value="180"></label>
+            <label>Height (px)<input id="plot-height" type="number" min="180" max="600" step="10" value="300"></label>
+            <label>Draw<select id="plot-style"><option value="lines">Lines</option><option value="points">Points</option><option value="both">Lines + points</option></select></label>
+          </div>
           <div class="axis-grid">
             <fieldset><legend>Distance / left axis (m)</legend>
               <label class="check"><input id="distance-auto" type="checkbox" checked>Auto scale</label>
@@ -100,7 +109,12 @@
             <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
           </fieldset>
           <details class="axis-settings">
-            <summary>Plot 2 axis limits</summary>
+            <summary>Plot 2 settings</summary>
+          <div class="plot-view-row">
+            <label>Last N samples<input id="second-display-count" type="number" min="10" max="2000" step="1" value="180"></label>
+            <label>Height (px)<input id="second-plot-height" type="number" min="180" max="600" step="10" value="300"></label>
+            <label>Draw<select id="second-plot-style"><option value="lines">Lines</option><option value="points">Points</option><option value="both">Lines + points</option></select></label>
+          </div>
             <div class="axis-grid">
               <fieldset><legend>Distance / left axis (m)</legend>
                 <label class="check"><input id="second-distance-auto" type="checkbox" checked>Auto scale</label>
@@ -164,56 +178,6 @@
         </details>
       </section>
       <section>
-        <details id="prior-panel" class="control-panel">
-        <summary>
-          <h2>Geometry prior</h2>
-          <span id="prior-revision">No prior</span>
-        </summary>
-        <form id="prior-form">
-          <label>Input mode
-            <select id="prior-mode" name="mode">
-              <option value="distance">Direct distance</option>
-              <option value="positions">Node positions</option>
-            </select>
-          </label>
-
-          <div id="distance-fields">
-            <label>Expected distance (m)
-              <input name="distance_m" type="number" min="0" max="1000" step="0.001" value="0.15" required>
-            </label>
-          </div>
-
-          <div id="position-fields" hidden>
-            <fieldset>
-              <legend>Node A (m)</legend>
-              <div class="coordinate-row">
-                <input name="ax" type="number" step="0.001" value="0" aria-label="Node A x">
-                <input name="ay" type="number" step="0.001" value="0" aria-label="Node A y">
-                <input name="az" type="number" step="0.001" value="0" aria-label="Node A z">
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Node B (m)</legend>
-              <div class="coordinate-row">
-                <input name="bx" type="number" step="0.001" value="2" aria-label="Node B x">
-                <input name="by" type="number" step="0.001" value="0" aria-label="Node B y">
-                <input name="bz" type="number" step="0.001" value="0" aria-label="Node B z">
-              </div>
-            </fieldset>
-          </div>
-
-          <label>Uncertainty (m)
-            <input name="uncertainty_m" type="number" min="0" step="0.001" value="0.010">
-          </label>
-          <label>Note
-            <input name="note" maxlength="200" placeholder="e.g. clear LOS at 2 m">
-          </label>
-          <button type="submit">Apply prior</button>
-          <p id="prior-error" class="error" role="alert" hidden></p>
-        </form>
-        </details>
-      </section>
-      <section>
         <details id="calibration-panel" class="control-panel">
           <summary>
             <h2>Calibration</h2>
@@ -238,8 +202,8 @@
               </label>
             </div>
             <div class="calibration-actions">
-              <button id="calibration-start" type="submit">Start capture</button>
-              <button id="calibration-stop" type="button">Stop capture</button>
+              <button id="calibration-start" type="submit" title="Start capture">Start</button>
+              <button id="calibration-stop" type="button" title="Stop capture">Stop</button>
               <button id="calibration-reset" type="button">Reset</button>
             </div>
           </form>
@@ -258,20 +222,52 @@
         </details>
       </section>
       <section>
-        <details id="recording-panel" class="control-panel" open>
-        <summary><h2>Recording</h2><span id="recording-state">Stopped</span></summary>
-        <form id="recording-form" class="recording-form">
-          <label>Session name
-            <input name="name" maxlength="80" value="experiment">
-          </label>
-          <button id="record-button" type="submit">Start recording</button>
-          <p id="recording-error" class="error" role="alert" hidden></p>
-        </form>
-        </details>
-      </section>
-      <section>
         <details id="experiment-panel" class="control-panel" open>
-        <summary><h2>Experiment setup</h2></summary>
+        <summary><h2>Experiment setup</h2><span id="prior-revision">No prior</span></summary>
+        <h3 class="subsection">Geometry prior</h3>
+        <form id="prior-form">
+              <label>Input mode
+                <select id="prior-mode" name="mode">
+                  <option value="distance">Direct distance</option>
+                  <option value="positions">Node positions</option>
+                </select>
+              </label>
+    
+              <div id="distance-fields">
+                <label>Distance (m)
+                  <input name="distance_m" type="number" min="0" max="1000" step="0.001" value="0.15" required>
+                </label>
+              </div>
+    
+              <div id="position-fields" hidden>
+                <fieldset>
+                  <legend>Node A (m)</legend>
+                  <div class="coordinate-row">
+                    <input name="ax" type="number" step="0.001" value="0" aria-label="Node A x">
+                    <input name="ay" type="number" step="0.001" value="0" aria-label="Node A y">
+                    <input name="az" type="number" step="0.001" value="0" aria-label="Node A z">
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>Node B (m)</legend>
+                  <div class="coordinate-row">
+                    <input name="bx" type="number" step="0.001" value="2" aria-label="Node B x">
+                    <input name="by" type="number" step="0.001" value="0" aria-label="Node B y">
+                    <input name="bz" type="number" step="0.001" value="0" aria-label="Node B z">
+                  </div>
+                </fieldset>
+              </div>
+    
+              <label>Uncertainty (m)
+                <input name="uncertainty_m" type="number" min="0" step="0.001" value="0.010">
+              </label>
+              <label>Note
+                <input name="note" maxlength="200" placeholder="e.g. clear LOS at 2 m">
+              </label>
+              <button type="submit">Apply prior</button>
+              <p id="prior-error" class="error" role="alert" hidden></p>
+            </form>
+        <h3 class="subsection">Batch</h3>
         <form id="experiment-form">
           <fieldset id="experiment-fields" class="form-fields">
             <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
@@ -284,7 +280,7 @@
             <label class="check"><input name="manual_start" type="checkbox"> Start each run manually (interval ignored)</label>
             <label>Notes<input name="notes" maxlength="200"></label>
           </fieldset>
-          <p id="experiment-prior" class="plot-note">Set a distance or position prior in Geometry prior above. <button type="button" class="info" data-tip="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis." aria-label="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.">i</button></p>
+          <p id="experiment-prior" class="plot-note">Set a distance or position prior above. <button type="button" class="info" data-tip="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis." aria-label="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.">i</button></p>
           <button id="experiment-start" type="submit">Start batch</button>
         </form>
         </details>
@@ -295,11 +291,21 @@
         <div id="analysis-settings" class="form-fields">
           <label>Residual source<select name="field"><option value="corrected_m">Corrected - expected</option><option value="raw_m">Raw - expected</option></select></label>
           <div id="analysis-methods" class="form-fields"></div>
+          <label>Distribution model
+            <select name="fit">
+              <option value="gaussian">Gaussian</option>
+              <option value="gmm">Gaussian mixture (GMM)</option>
+              <option value="lognormal">Log-normal (shifted)</option>
+              <option value="student_t">Student-t</option>
+              <option value="laplace">Laplace</option>
+              <option value="skew_normal">Skew-normal</option>
+            </select>
+          </label>
           <details><summary>Method parameters</summary>
             <div class="form-fields">
               <label>Histogram bins<input name="histogram_bins" type="number" min="1" max="200" value="30" required></label>
-              <label>GMM components<input name="components" type="number" min="1" max="6" value="2" required></label>
-              <label>GMM random seed<input name="seed" type="number" min="0" max="4294967295" value="0" required></label>
+              <label>GMM components (GMM model)<input name="components" type="number" min="1" max="6" value="2" required></label>
+              <label>GMM random seed (GMM model)<input name="seed" type="number" min="0" max="4294967295" value="0" required></label>
             </div>
           </details>
           <button id="analysis-full" type="button">Recompute full closed dataset</button>

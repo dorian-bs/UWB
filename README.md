@@ -25,8 +25,8 @@ The dashboard supports:
 
 - Raw/corrected distance, a geometry prior, residuals, and rolling bias/spread.
 - Recording and replay, with raw measurements kept unchanged.
-- Repeated timed runs and basic noise analysis: statistics, histogram/Gaussian,
-  spectrum, and Gaussian mixtures.
+- Repeated timed runs and basic noise analysis: statistics, histogram with a
+  selectable distribution fit (Gaussian, mixture, log-normal, ...), and a spectrum over all runs.
 - A suggestion-only antenna-delay calibration assistant.
 - Physical radio controls when both boards are connected over USB.
 

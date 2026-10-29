@@ -134,7 +134,7 @@ def test_analysis_worker_coalesces_pending_requests(tmp_path):
         third = service.submit(
             AnalysisRequest(
                 batch_id=runner.status()["batch_id"],
-                methods=["histogram"],
+                methods=["distribution"],
             )
         )
         assert service.get(second["job_id"])["state"] == "superseded"
@@ -200,7 +200,7 @@ def test_cumulative_analysis_fits_every_sample_not_run_means_or_a_window(tmp_pat
                     stream.write(json.dumps(sample) + "\n")
         service = AnalysisService(runner)
         job = service.submit(
-            AnalysisRequest(batch_id=batch_id, methods=["statistics", "histogram", "psd", "gmm"])
+            AnalysisRequest(batch_id=batch_id, methods=["statistics", "distribution", "psd"], fit="gmm")
         )
         await service.close()
         result = service.get(job["job_id"])
@@ -213,16 +213,44 @@ def test_cumulative_analysis_fits_every_sample_not_run_means_or_a_window(tmp_pat
         assert metrics["count"] == 3200
         assert metrics["bias_m"] == pytest.approx(np.mean(residuals))
         assert metrics["std_m"] == pytest.approx(np.std(residuals, ddof=1))
-        gaussian = {item["key"]: item["value"] for item in results["histogram"]["metrics"]}
-        assert gaussian["mean_m"] == pytest.approx(np.mean(residuals))
-        assert gaussian["sigma_m"] == pytest.approx(np.std(residuals))
         assert results["psd"]["status"] == "ok"
         spectrum_metrics = {item["key"]: item["value"] for item in results["psd"]["metrics"]}
         assert spectrum_metrics["count"] == 3200
-        assert results["gmm"]["status"] == "ok"
-        assert sum(row[0] * row[1] for row in results["gmm"]["tables"][0]["rows"]) == pytest.approx(
+        assert results["distribution"]["status"] == "ok"
+        assert sum(row[0] * row[1] for row in results["distribution"]["tables"][0]["rows"]) == pytest.approx(
             np.mean(residuals), abs=1e-6
         )
+
+    asyncio.run(scenario())
+
+
+def test_spectrum_pools_all_runs_even_when_scope_selects_one(tmp_path):
+    from uwb_lab.analysis import AnalysisRequest
+    from uwb_lab.analysis_jobs import AnalysisService
+
+    async def scenario():
+        runner = archive(tmp_path)
+        batch_id = runner.status()["batch_id"]
+        batch = runner.load_batch(batch_id)
+        for run in batch["runs"]:
+            path = runner.batch_path(batch_id) / run["session"] / "telemetry.ndjson"
+            template = json.loads(path.read_text().splitlines()[0])
+            with path.open("w") as stream:
+                for seq in range(200):
+                    stream.write(json.dumps({**template, "seq": seq, "time_ms": seq * 100}) + "\n")
+        service = AnalysisService(runner)
+        job = service.submit(
+            AnalysisRequest(batch_id=batch_id, scope="current", methods=["statistics", "psd"])
+        )
+        await service.close()
+        output = service.get(job["job_id"])["output"]
+        results = {item["method"]: item["result"] for item in output["results"]}
+        statistics = {item["key"]: item["value"] for item in results["statistics"]["metrics"]}
+        spectrum = {item["key"]: item["value"] for item in results["psd"]["metrics"]}
+        assert statistics["count"] == 200
+        assert spectrum["count"] == 200 * len(batch["runs"])
+        assert spectrum["runs"] == len(batch["runs"])
+        assert output["provenance"]["spectrum_runs"]
 
     asyncio.run(scenario())
 

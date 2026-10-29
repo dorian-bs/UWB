@@ -75,7 +75,7 @@ def test_full_analysis_job_for_saved_run(client):
         socket.receive_json()
         socket.receive_json()
     client.post("/api/experiments/stop")
-    assert "gmm" in client.get("/api/analysis/methods").json()["methods"]
+    assert "distribution" in client.get("/api/analysis/methods").json()["methods"]
     submitted = client.post(
         "/api/analysis/jobs",
         json={

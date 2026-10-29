@@ -52,9 +52,9 @@ source fingerprint, outcomes, prior references, seed and library versions.
 | Method | Implemented semantics |
 | --- | --- |
 | Summary | Count, signed bias, sample standard deviation (`ddof=1`), RMSE and linear-interpolated P95 absolute error |
-| Histogram / Gaussian | Density-normalized histogram and single-Gaussian maximum-likelihood baseline; degenerate constant fits are flagged |
-| Spectrum | Sample-weighted within-run Welch density for regular timing, or Lomb-Scargle power for gaps/irregular cadence; at least 32 eligible samples per run |
-| GMM | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads, likelihood, AIC/BIC |
+| Distribution fit | Density-normalized histogram with one maximum-likelihood fit chosen by the user: Gaussian, GMM, shifted log-normal, Student-t, Laplace or skew-normal; mean log likelihood, AIC, BIC and KS distance, plus a comparison of all models. Degenerate constant data is flagged |
+| GMM (fit option) | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads |
+| Spectrum | Sample-weighted within-run Welch density for regular timing, or Lomb-Scargle power for gaps/irregular cadence; uses every recorded run of the batch regardless of scope, skipping runs with fewer than 32 eligible samples |
 
 Welch requires increasing device times, consecutive sequences and every time
 delta within 5% of both its run median and the pooled median. The median

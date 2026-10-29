@@ -38,11 +38,12 @@ def test_experiment_panels_start_collapsed_and_contain_existing_controls() -> No
     parser.feed(page.read_text(encoding="utf-8"))
     for panel, controls in {
         "radio-panel": {"radio-form", "radio-fields", "radio-error"},
-        "prior-panel": {"prior-form", "prior-mode", "prior-error", "prior-revision"},
     }.items():
         assert panel in parser.panels, f"{panel} must be an independent details section"
         assert panel not in parser.open_panels, f"{panel} should start collapsed"
         assert controls <= parser.panels[panel]
+    prior_and_batch = {"prior-form", "prior-mode", "prior-error", "prior-revision", "experiment-form"}
+    assert prior_and_batch <= parser.panels["experiment-panel"]
 
 
 def test_display_logic() -> None:

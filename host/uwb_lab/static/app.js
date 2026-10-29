@@ -12,6 +12,7 @@ const DEFAULTS = {
   distance: { auto: true, min: 0, max: 4 },
   error: { auto: true, min: -0.1, max: 0.1 },
   secondPlot: {
+    count: 180, height: 300, style: "lines",
     series: ["residual_m"],
     distance: { auto: true, min: 0, max: 4 },
     error: { auto: true, min: -0.1, max: 0.1 },
@@ -19,21 +20,33 @@ const DEFAULTS = {
 };
 const STORAGE_KEY = "uwb-lab-display-v1";
 
-function validatePreferences(value) {
+function validateView(value, label) {
   if (!value || !Number.isInteger(value.count) || value.count < 10 || value.count > 2000 ||
       !Number.isInteger(value.height) || value.height < 180 || value.height > 600 ||
-      !["lines", "points", "both"].includes(value.style) ||
-      typeof value.secondary !== "boolean" || typeof value.controls !== "boolean") {
-    throw new Error("Invalid display settings. Samples: 10-2000; height: 180-600 px.");
+      !["lines", "points", "both"].includes(value.style)) {
+    throw new Error(`${label}: invalid display settings. Samples: 10-2000; height: 180-600 px.`);
   }
+  return { count: value.count, height: value.height, style: value.style };
+}
+
+function validatePreferences(value) {
+  if (!value || typeof value.secondary !== "boolean" || typeof value.controls !== "boolean") {
+    throw new Error("Invalid display settings.");
+  }
+  // Preferences saved before independent plots have no secondPlot field; plot 2 then inherits plot 1's view.
+  const { count, height, style, ...defaultAxes } = DEFAULTS.secondPlot;
+  const second = value.secondPlot === undefined ? defaultAxes : value.secondPlot;
   return {
-    count: value.count, height: value.height, style: value.style,
+    ...validateView(value, "Plot 1"),
     secondary: value.secondary, controls: value.controls,
     ...validatePlotPreferences(value, "Plot 1"),
-    // Preferences saved before independent plots have no secondPlot field.
-    secondPlot: validatePlotPreferences(
-      value.secondPlot === undefined ? DEFAULTS.secondPlot : value.secondPlot, "Plot 2",
-    ),
+    secondPlot: {
+      ...validateView({
+        count: second?.count ?? value.count, height: second?.height ?? value.height,
+        style: second?.style ?? value.style,
+      }, "Plot 2"),
+      ...validatePlotPreferences(second, "Plot 2"),
+    },
   };
 }
 
@@ -292,11 +305,11 @@ function startDashboard() {
     catch (error) { showError("display-warning", `Display settings work, but could not be saved: ${error.message}`); }
   }
   function syncControls() {
-    byId("display-count").value = preferences.count;
-    byId("plot-height").value = preferences.height;
-    byId("plot-style").value = preferences.style;
     byId("secondary-plot").checked = preferences.secondary;
     for (const [prefix, settings] of [["", preferences], ["second-", preferences.secondPlot]]) {
+      byId(`${prefix}display-count`).value = settings.count;
+      byId(`${prefix}plot-height`).value = settings.height;
+      byId(`${prefix}plot-style`).value = settings.style;
       document.querySelectorAll(`#${prefix}series-controls input`).forEach((input) => {
         input.checked = settings.series.includes(input.value);
       });
@@ -311,13 +324,12 @@ function startDashboard() {
     byId("experiment-controls").hidden = !preferences.controls;
     document.querySelector(".workspace").classList.toggle("controls-hidden", !preferences.controls);
     byId("toggle-controls").setAttribute("aria-expanded", String(preferences.controls));
-    byId("toggle-controls").textContent = `${preferences.controls ? "Hide" : "Show"} experiment controls`;
+    byId("toggle-controls").textContent = preferences.controls ? "\u203a" : "\u2039";
+    byId("toggle-controls").title = byId("toggle-controls").ariaLabel = `${preferences.controls ? "Hide" : "Show"} panel`;
   }
   function updatePreferences() {
     const candidate = {
-      ...preferences, count: Number(byId("display-count").value),
-      height: Number(byId("plot-height").value), style: byId("plot-style").value,
-      secondary: byId("secondary-plot").checked,
+      ...preferences, secondary: byId("secondary-plot").checked,
     };
     try {
       preferences = validatePreferences(candidate);
@@ -329,6 +341,9 @@ function startDashboard() {
   function updatePlotPreferences(prefix) {
     const previous = prefix ? preferences.secondPlot : preferences;
     const candidate = {
+      count: Number(byId(`${prefix}display-count`).value),
+      height: Number(byId(`${prefix}plot-height`).value),
+      style: byId(`${prefix}plot-style`).value,
       series: [...document.querySelectorAll(`#${prefix}series-controls input:checked`)].map((input) => input.value),
     };
     for (const family of ["distance", "error"]) {
@@ -341,7 +356,8 @@ function startDashboard() {
       }
     }
     try {
-      const plot = validatePlotPreferences(candidate, prefix ? "Plot 2" : "Plot 1");
+      const label = prefix ? "Plot 2" : "Plot 1";
+      const plot = { ...validateView(candidate, label), ...validatePlotPreferences(candidate, label) };
       preferences = prefix ? { ...preferences, secondPlot: plot } : { ...preferences, ...plot };
       showError(`${prefix}plot-error`, "");
       savePreferences();
@@ -463,7 +479,7 @@ function startDashboard() {
     for (const series of selected) {
       ctx.strokeStyle = series.color; ctx.fillStyle = series.color;
       ctx.lineWidth = 1.5; ctx.setLineDash(series.dash);
-      if (preferences.style !== "points") {
+      if (settings.style !== "points") {
         ctx.beginPath();
         let drawing = false;
         samples.forEach((sample, index) => {
@@ -474,7 +490,7 @@ function startDashboard() {
         });
         ctx.stroke();
       }
-      if (preferences.style !== "lines" || samples.length === 1) {
+      if (settings.style !== "lines" || samples.length === 1) {
         samples.forEach((sample, index) => {
           if (!Number.isFinite(sample[series.key])) return;
           ctx.beginPath(); ctx.arc(x(index), y(sample[series.key], series.family), 2, 0, Math.PI * 2); ctx.fill();
@@ -495,7 +511,8 @@ function startDashboard() {
   }
 
   function drawAll() {
-    document.documentElement.style.setProperty("--plot-height", `${preferences.height}px`);
+    byId("distance-chart").style.setProperty("--plot-height", `${preferences.height}px`);
+    byId("residual-chart").style.setProperty("--plot-height", `${preferences.secondPlot.height}px`);
     byId("secondary-block").hidden = !preferences.secondary;
     const samples = view.visible(preferences.count);
     const last = samples.at(-1) || {};
@@ -504,7 +521,7 @@ function startDashboard() {
       ["bias-value", "rolling_bias_m"], ["spread-value", "rolling_std_m"],
     ]) byId(id).textContent = format(last[key]);
     drawChart(byId("distance-chart"), samples, preferences);
-    if (preferences.secondary) drawChart(byId("residual-chart"), samples, preferences.secondPlot);
+    if (preferences.secondary) drawChart(byId("residual-chart"), view.visible(preferences.secondPlot.count), preferences.secondPlot);
     byId("view-state").textContent = view.paused() ? "Paused view - acquisition continues" : "Live view";
     byId("view-state").classList.toggle("paused", view.paused());
     byId("pause-view").textContent = view.paused() ? "Resume view" : "Pause view";
@@ -538,7 +555,7 @@ function startDashboard() {
       byId("prior-revision").textContent = status.prior ? `Revision ${status.prior.revision}` : "No prior";
       recording = status.recording;
       byId("recording-state").textContent = recording ? status.session : "Stopped";
-      byId("record-button").textContent = recording ? "Stop recording" : "Start recording";
+      byId("record-button").textContent = recording ? "Stop" : "Record";
       byId("record-button").classList.toggle("stop", recording);
       showError("error-message", status.last_error || "");
       updateRadioStatus(status);

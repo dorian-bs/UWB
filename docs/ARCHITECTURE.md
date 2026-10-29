@@ -119,8 +119,10 @@ Failures are exposed to the UI. Saved outputs include the recipe, source SHA-256
 run states, prior revisions, analysis version (`noise-3`), and library versions.
 No database, task-queue service, or plugin registry is involved.
 
-NumPy/SciPy/scikit-learn implement statistics, histogram/Gaussian, spectrum,
-and GMM. Samples are pooled by count, not by averaging run means.
+NumPy/SciPy/scikit-learn implement statistics, the histogram with a selectable
+distribution fit (Gaussian, GMM, log-normal, Student-t, Laplace, skew-normal)
+and the spectrum. The spectrum always pools every recorded run of the batch,
+whatever the scope selection. Samples are pooled by count, not by averaging run means.
 Spectra stay within run boundaries: regular timing uses Welch density;
 gaps/irregular cadence use Lomb-Scargle power. See
 [method semantics](EXPERIMENTS_AND_VALIDATION.md#repeated-run-console-and-initial-diagnostics)

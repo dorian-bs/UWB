@@ -219,10 +219,12 @@ class SessionRecorder:
         if self.active:
             raise ValueError("a recording is already active")
         safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip()).strip("-") or "session"
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        session_dir = (parent if parent is not None else self.root) / (
-            f"{stamp}-{safe_name}-{uuid.uuid4().hex[:8]}"
-        )
+        stamp = datetime.now(UTC).strftime("%y%m%d-%H%M")
+        base = (parent if parent is not None else self.root) / f"{stamp}-{safe_name}"
+        session_dir, attempt = base, 1
+        while session_dir.exists():
+            attempt += 1
+            session_dir = base.with_name(f"{base.name}-{attempt}")
         session_dir.mkdir(parents=True, exist_ok=False)
         self.started_at = utc_now()
         manifest = {

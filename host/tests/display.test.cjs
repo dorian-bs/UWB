@@ -314,7 +314,7 @@ test("pause freezes data through arrivals and snapshots; resume shows latest dat
 
 test("dashboard markup includes antenna-delay calibration assistant panel", () => {
   const html = fs.readFileSync(require.resolve("../uwb_lab/static/index.html"), "utf8");
-  assert.match(html, /Calibration assistant/);
+  assert.match(html, /<h2>Calibration<\/h2>/);
   assert.match(html, /id="calibration-panel"/);
   assert.match(html, /id="calibration-form"/);
   assert.match(

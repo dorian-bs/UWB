@@ -15,7 +15,7 @@ the noise before adding more models.
 | Dashboard | Two configurable signal plots, pause-view, display preferences, connection/recording health |
 | Radio | Coordinated dual-USB rate/channel/preamble/data-rate/TX-power changes, readback and rollback |
 | Experiments | Host-scheduled repeated timed runs and intervals; separate recordings and incomplete/interrupted outcomes |
-| Analysis | Five core residual statistics, histogram/Gaussian, Welch or gap-aware Lomb-Scargle spectrum, seeded GMM |
+| Analysis | Five core residual statistics, histogram with a selectable distribution fit (Gaussian, GMM, shifted log-normal, Student-t, Laplace, skew-normal) and model comparison, Welch or gap-aware Lomb-Scargle spectrum pooled over all runs of the batch |
 | Calibration | Host-verified dual-USB fixed-LOS capture, evaluated antenna-delay preview/apply, readback/rollback and saved audit; runtime-only |
 | Development | Hardware-free Python/API, Node UI, and native C harness tests; thin setup/build/flash wrappers |
 

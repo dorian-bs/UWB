@@ -1,12 +1,19 @@
+const ANALYSIS_FITS = ["gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"];
 const ANALYSIS_DEFAULTS = {
-  field: "corrected_m", methods: ["statistics", "histogram", "psd", "gmm"],
-  histogram_bins: 30, components: 2, seed: 0,
+  field: "corrected_m", methods: ["statistics", "distribution", "psd"],
+  fit: "gaussian", histogram_bins: 30, components: 2, seed: 0,
 };
 
 function validateAnalysisPreferences(value, methodIds = ANALYSIS_DEFAULTS.methods) {
   if (!value || typeof value !== "object") throw new Error("Invalid analysis preferences");
   const result = {...ANALYSIS_DEFAULTS};
   for (const key of Object.keys(result)) if (key in value) result[key] = value[key];
+  if (Array.isArray(result.methods)) {
+    // Older settings had separate histogram and GMM cards; they are now one distribution fit.
+    if (!("fit" in value) && result.methods.includes("gmm")) result.fit = "gmm";
+    result.methods = result.methods.map((method) => ["histogram", "gmm"].includes(method) ? "distribution" : method);
+  }
+  if (!ANALYSIS_FITS.includes(result.fit)) throw new Error("Invalid distribution model");
   if (!["raw_m", "corrected_m"].includes(result.field) || !Array.isArray(result.methods) ||
       result.methods.some((method) => method !== "acf" && !methodIds.includes(method))) throw new Error("Invalid analysis methods");
   for (const [name, minimum, maximum] of [
@@ -38,7 +45,6 @@ function formatAnalysisValue(value, unit = "", signed = false) {
 
 function analysisCardSummary(method, metrics) {
   const headerKeys = method === "statistics" ? ["count"] : method === "psd" ? ["count", "runs"] : [];
-  const detailKeys = method === "gmm" ? ["log_likelihood", "converged"] : [];
   let estimator = null;
   if (method === "psd") {
     if (metrics.some((metric) => metric.key === "missing_samples")) {
@@ -48,18 +54,17 @@ function analysisCardSummary(method, metrics) {
     }
   }
   const labels = {
-    std_m: "Std dev", p95_abs_m: "P95 error", mean_m: "Mean", sigma_m: "Sigma",
+    std_m: "Std dev", p95_abs_m: "P95 error", log_likelihood: "Log-lik / sample", ks: "KS distance",
     fs_hz: "Sample rate", segment: "Segment", missing_samples: "Missing",
     resolution_hz: estimator === "Lomb-Scargle" ? "Grid step" : "Bin width",
   };
   return {
     estimator,
-    metrics: metrics.filter((metric) => !headerKeys.includes(metric.key) && !detailKeys.includes(metric.key))
+    metrics: metrics.filter((metric) => !headerKeys.includes(metric.key))
       .map((metric) => {
         const scope = metric.label?.match(/ \((?:full selection|window)\)$/)?.[0] || "";
         return {...metric, title: metric.label, label: labels[metric.key] ? labels[metric.key] + scope : metric.label};
       }),
-    detailMetrics: metrics.filter((metric) => detailKeys.includes(metric.key)),
   };
 }
 
@@ -77,14 +82,15 @@ function analysisSourceSummary(output, field) {
       `Field: ${field}. Exclusions: ${JSON.stringify(output.excluded)}. ` +
       `Source ${provenance.source_sha256}; ${provenance.analysis_version}. ` +
       "Residual = range - recorded expected distance; prior errors are included. " +
-      "All eligible samples are pooled by sample count. Repeated runs need not be independent.",
+      "All eligible samples are pooled by sample count. Repeated runs need not be independent." +
+      (provenance.spectrum_runs?.length ? ` The spectrum pools all ${provenance.spectrum_runs.length} recorded runs of the batch.` : ""),
   };
 }
 
 function analysisLegendLabels(series) {
   if (series.length < 2) return [];
-  const labels = {"Empirical density": "Samples", "Gaussian baseline": "Gaussian", "Mixture density": "Mixture"};
-  return series.map((curve) => labels[curve.label] || curve.label.replace(/^Component (\d+)$/, "C$1"));
+  return series.map((curve) =>
+    curve.label === "Empirical density" ? "Samples" : curve.label.replace(/^Component (\d+)$/, "C$1"));
 }
 
 function resultMatches(selection, job) {
@@ -161,7 +167,7 @@ function startAnalysisPanel({request, showError}) {
   let selection = null, generation = 0, busy = false, dirty = true, lastComputed = 0;
   let mode = "cumulative", plots = [], timer = null, hasResults = false;
   let cards = new Map();
-  const methodDetailsOpen = new Map();
+  const compareOpen = new Map();
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
     if (text != null) element.textContent = text;
@@ -210,8 +216,20 @@ function startAnalysisPanel({request, showError}) {
       card.dataset.method = item.method;
       const summary = analysisCardSummary(item.method, result.metrics);
       const header = node("header", null, "analysis-card-header");
-      const titles = {statistics: "Residuals", histogram: "Histogram", psd: "Spectrum", gmm: "Gaussian mixture"};
-      header.append(node("h3", `${titles[item.method] || item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
+      const titles = {statistics: "Residuals", distribution: "Distribution fit", psd: "Spectrum (all runs)"};
+      const title = node("div", null, "analysis-card-title");
+      title.append(node("h3", `${titles[item.method] || item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
+      // Methodology notes live behind an info button instead of an extra disclosure.
+      const methodNotes = result.warnings.filter((warning) =>
+        item.method === "psd" || warning.startsWith("Components are exploratory"));
+      if (methodNotes.length) {
+        const info = node("button", "i", "info");
+        info.type = "button";
+        info.dataset.tip = methodNotes.join(" ");
+        info.setAttribute("aria-label", info.dataset.tip);
+        title.append(info);
+      }
+      header.append(title);
       if (summary.estimator) header.append(node("span", summary.estimator, "analysis-badge analysis-badge--method"));
       card.append(header);
       const notice = node("p", result.status === "ok" ? "" : `${result.status}: ${result.reason}`, "analysis-notice");
@@ -232,7 +250,11 @@ function startAnalysisPanel({request, showError}) {
         metrics.append(cell);
       }
       if (summary.metrics.length) card.append(metrics);
-      for (const value of result.tables) card.append(table(value.columns, value.rows));
+      const comparisons = [];
+      for (const value of result.tables) {
+        if (value.title === "Compare models") comparisons.push(value);
+        else card.append(table(value.columns, value.rows));
+      }
       for (const plot of result.plots) {
         const canvas = node("canvas");
         canvas.setAttribute("aria-label", `${item.label}: ${plot.x_label}; ${plot.y_label}`);
@@ -245,18 +267,13 @@ function startAnalysisPanel({request, showError}) {
         }
         cardPlots.push({canvas, plot});
       }
-      const methodNotes = result.warnings.filter((warning) =>
-        item.method === "psd" || (item.method === "gmm" && warning.startsWith("Exploratory components are not LOS/NLOS labels;")));
       result.warnings.filter((warning) => !methodNotes.includes(warning))
         .forEach((warning) => card.append(node("p", warning, "plot-note")));
-      if (methodNotes.length || summary.detailMetrics.length) {
+      for (const value of comparisons) {
         const details = node("details", null, "analysis-method-details");
-        details.open = methodDetailsOpen.get(item.method) === true;
-        details.addEventListener("toggle", () => { methodDetailsOpen.set(item.method, details.open); });
-        details.append(node("summary", "Details"));
-        methodNotes.forEach((note) => details.append(node("p", note, "plot-note")));
-        summary.detailMetrics.forEach((metric) => details.append(node("p",
-          `${metric.label}: ${formatAnalysisValue(metric.value, metric.unit)}`, "plot-note")));
+        details.open = compareOpen.get(item.method) === true;
+        details.addEventListener("toggle", () => { compareOpen.set(item.method, details.open); });
+        details.append(node("summary", "Compare all models (lower AIC / BIC is better)"), table(value.columns, value.rows));
         card.append(details);
       }
       nextCards.push(card);
@@ -275,7 +292,7 @@ function startAnalysisPanel({request, showError}) {
     plots.forEach(({canvas, plot}) => drawAnalysisChart(canvas, plot));
   }
   function loadControls() {
-    for (const key of ["field", "histogram_bins", "components", "seed"]) {
+    for (const key of ["field", "fit", "histogram_bins", "components", "seed"]) {
       byId("analysis-settings").querySelector(`[name="${key}"]`).value = preferences[key];
     }
     byId("analysis-methods").replaceChildren();
@@ -287,7 +304,10 @@ function startAnalysisPanel({request, showError}) {
   }
   function changed() {
     try {
-      const candidate = {field: byId("analysis-settings").querySelector('[name="field"]').value};
+      const candidate = {
+        field: byId("analysis-settings").querySelector('[name="field"]').value,
+        fit: byId("analysis-settings").querySelector('[name="fit"]').value,
+      };
       for (const key of ["histogram_bins", "components", "seed"]) {
         const raw = byId("analysis-settings").querySelector(`[name="${key}"]`).value;
         if (raw === "") throw new Error(`Enter ${key.replaceAll("_", " ")}`);
