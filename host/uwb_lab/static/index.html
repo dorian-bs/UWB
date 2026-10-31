@@ -36,13 +36,28 @@
         <p id="experiment-timing" class="plot-note">Closing the browser does not stop a batch.</p>
         <p id="experiment-error" class="error" role="alert" hidden></p>
       </section>
-      <div class="metrics" aria-label="Current measurements">
-        <div><span>Corrected range</span><strong id="range-value">--</strong><small>m</small></div>
-        <div><span>Expected</span><strong id="expected-value">--</strong><small>m</small></div>
-        <div><span>Residual</span><strong id="residual-value">--</strong><small>m</small></div>
-        <div><span>Rolling bias</span><strong id="bias-value">--</strong><small>m</small></div>
-        <div><span>Rolling spread</span><strong id="spread-value">--</strong><small>m</small></div>
-      </div>
+      <dl class="analysis-metrics" aria-label="Current measurements">
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="range-value">--</strong><span class="metric-unit">m</span></dd>
+          <dt>Corrected range</dt>
+        </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="expected-value">--</strong><span class="metric-unit">m</span></dd>
+          <dt>Expected</dt>
+        </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="residual-value">--</strong><span class="metric-unit">m</span></dd>
+          <dt>Residual</dt>
+        </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="bias-value">--</strong><span class="metric-unit">m</span></dd>
+          <dt>Rolling bias</dt>
+        </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="spread-value">--</strong><span class="metric-unit">m</span></dd>
+          <dt>Rolling spread</dt>
+        </div>
+      </dl>
 
       <section class="display-controls" aria-label="Shared display settings">
         <div class="toolbar">
