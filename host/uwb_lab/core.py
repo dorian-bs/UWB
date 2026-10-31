@@ -55,6 +55,14 @@ def _finite_float(value: Any, name: str) -> float:
     return result
 
 
+def _bounded_int(value: Any, name: str, lower: int, upper: int) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an integer")
+    if not lower <= value <= upper:
+        raise ValueError(f"{name} must be between {lower} and {upper}")
+    return value
+
+
 def _point(value: Any, name: str) -> tuple[float, float, float]:
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         raise ValueError(f"{name} must contain x, y and z")
@@ -93,6 +101,17 @@ def make_prior(payload: dict[str, Any], revision: int) -> Prior:
     )
 
 
+V2_DIAGNOSTIC_FIELDS: dict[str, tuple[int, int]] = {
+    "ipatov_power": (0, 0xFFFFFFFF),
+    "ipatov_f1": (0, 0xFFFFFFFF),
+    "ipatov_f2": (0, 0xFFFFFFFF),
+    "ipatov_f3": (0, 0xFFFFFFFF),
+    "ipatov_fp_index": (0, 0xFFFF),
+    "ipatov_accum_count": (0, 0xFFFF),
+    "cia_diag1": (0, 0xFFFFFFFF),
+}
+
+
 def parse_range_line(line: str) -> dict[str, Any] | None:
     line = line.strip()
     if not line.startswith("{") or len(line) > 2048:
@@ -101,13 +120,16 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
         message = json.loads(line)
     except json.JSONDecodeError:
         return None
-    if not isinstance(message, dict) or message.get("type") != "range" or message.get("v") != 1:
+    if not isinstance(message, dict) or message.get("type") != "range":
+        return None
+    version = message.get("v")
+    if version not in (1, 2):
         return None
 
     try:
         sample = {
             "type": "range",
-            "v": 1,
+            "v": int(version),
             "board": int(message["board"]),
             "peer": int(message["peer"]),
             "seq": int(message["seq"]),
@@ -123,6 +145,12 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
         return None
     if not 0 <= sample["raw_m"] <= 1000 or not 0 <= sample["corrected_m"] <= 1000:
         return None
+    if sample["v"] == 2:
+        try:
+            for field, (lower, upper) in V2_DIAGNOSTIC_FIELDS.items():
+                sample[field] = _bounded_int(message[field], field, lower, upper)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
     if "radio_revision" in message:
         revision = message["radio_revision"]
         if type(revision) is not int or not 0 <= revision <= 0xFFFFFFFF:
