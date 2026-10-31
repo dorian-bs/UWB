@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UWB Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="/app.css">
   <script>try { if (localStorage.getItem("uwb-theme") === "light") document.documentElement.dataset.theme = "light"; } catch {}</script>
 </head>
@@ -303,7 +306,7 @@
             </div>
             <label>Interval between runs (s)<input name="interval_s" type="number" min="0" step="any" value="0.5" required></label>
             <label>Start delay before each batch/run (s)<input name="start_delay_s" type="number" min="0" step="any" value="0" required></label>
-            <label class="check"><input name="manual_start" type="checkbox"> Start each run manually (interval ignored)</label>
+            <label class="check"><input name="manual_start" type="checkbox"> Start each run manually</label>
             <label>Notes<input name="notes" maxlength="200"></label>
           </fieldset>
           <p id="experiment-prior" class="plot-note">Set a distance or position prior above. <button type="button" class="info" data-tip="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis." aria-label="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.">i</button></p>
