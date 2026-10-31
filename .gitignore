@@ -17,3 +17,6 @@ data/sessions/
 
 # Lab-specific addresses, serial paths, and credentials (template: LAB_NOTES.example.md)
 LAB_NOTES.md
+
+# Local git worktrees used for isolated agent execution
+.worktrees/
