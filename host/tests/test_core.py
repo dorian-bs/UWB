@@ -19,6 +19,28 @@ VALID_LINE = json.dumps(
     }
 )
 
+VALID_LINE_V2 = json.dumps(
+    {
+        "type": "range",
+        "v": 2,
+        "board": 1,
+        "peer": 2,
+        "seq": 8,
+        "time_ms": 1300,
+        "raw_m": 2.12,
+        "corrected_m": 2.10,
+        "valid": True,
+        "radio_revision": 7,
+        "ipatov_power": 123456,
+        "ipatov_f1": 1000,
+        "ipatov_f2": 2000,
+        "ipatov_f3": 3000,
+        "ipatov_fp_index": 512,
+        "ipatov_accum_count": 128,
+        "cia_diag1": 42,
+    }
+)
+
 
 class CoreTests(unittest.TestCase):
     def test_parses_firmware_range_message(self) -> None:
@@ -30,6 +52,21 @@ class CoreTests(unittest.TestCase):
     def test_rejects_debug_and_invalid_messages(self) -> None:
         self.assertIsNone(parse_range_line("ds_twr.distance = 2.1 m"))
         self.assertIsNone(parse_range_line('{"type":"range","v":2}'))
+
+    def test_parses_firmware_range_message_v2(self) -> None:
+        sample = parse_range_line(VALID_LINE_V2)
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["v"], 2)
+        self.assertEqual(sample["ipatov_power"], 123456)
+
+    def test_rejects_v2_when_diagnostics_missing_or_invalid(self) -> None:
+        missing = json.loads(VALID_LINE_V2)
+        del missing["ipatov_f1"]
+        self.assertIsNone(parse_range_line(json.dumps(missing)))
+
+        wrong_type = json.loads(VALID_LINE_V2)
+        wrong_type["ipatov_power"] = -1
+        self.assertIsNone(parse_range_line(json.dumps(wrong_type)))
 
     def test_position_prior_and_live_residual(self) -> None:
         state = LabState()

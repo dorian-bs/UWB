@@ -273,6 +273,43 @@ def test_replay_preserves_radio_revision(monkeypatch, tmp_path):
     asyncio.run(scenario())
 
 
+def test_replay_preserves_v2_diagnostics(monkeypatch, tmp_path):
+    from uwb_lab import app as app_module
+
+    line = {
+        "type": "range",
+        "v": 2,
+        "board": 1,
+        "peer": 2,
+        "seq": 1,
+        "time_ms": 200,
+        "raw_m": 2,
+        "corrected_m": 2,
+        "valid": True,
+        "ipatov_power": 123,
+        "ipatov_f1": 10,
+        "ipatov_f2": 11,
+        "ipatov_f3": 12,
+        "ipatov_fp_index": 256,
+        "ipatov_accum_count": 64,
+        "cia_diag1": 99,
+    }
+    path = tmp_path / "replay.ndjson"
+    path.write_text(json.dumps(line) + "\n")
+    monkeypatch.setenv("UWB_REPLAY_FILE", str(path))
+
+    async def scenario():
+        source = app_module.replay_source()
+        try:
+            sample = json.loads(await anext(source))
+            assert sample["ipatov_power"] == 123
+            assert sample["cia_diag1"] == 99
+        finally:
+            await source.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_configuration_readback_mismatch_is_not_success():
     async def scenario():
         control, tx, rx = pair()
