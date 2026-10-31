@@ -118,7 +118,22 @@ function chartBounds(series) {
   return {x: extent(xs), y: extent(ys)};
 }
 
+function chartTheme() {
+  if (document.documentElement.dataset.theme === "light") {
+    return {
+      text: "#52615e", grid: "#dfe5e2", zero: "#8a9893", panel: "#fff",
+      series: {raw_m: "#536878", corrected_m: "#176b87", expected_m: "#966000", residual_m: "#b63036", rolling_bias_m: "#7851a9", rolling_std_m: "#087f5b"},
+      curves: ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#b35c10"],
+    };
+  }
+  return {
+    text: "#9aaaa5", grid: "#2a3532", zero: "#6f7e79", panel: "#18201e", series: {},
+    curves: ["#4fb3d1", "#3ecf9f", "#e0a73a", "#ff6b72", "#b08fe0", "#8fa7b8", "#d47729"],
+  };
+}
+
 function drawAnalysisChart(canvas, plot) {
+  const theme = chartTheme();
   const bounds = chartBounds(plot.series);
   const width = canvas.clientWidth || 400, height = 220, ratio = window.devicePixelRatio || 1;
   canvas.width = width * ratio; canvas.height = height * ratio;
@@ -129,16 +144,16 @@ function drawAnalysisChart(canvas, plot) {
   const y = (value) => area.bottom - (value - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
   const xUnit = plot.x_label.match(/\(([^)]+)\)$/)?.[1] || "";
   const yUnit = plot.y_label.match(/\(([^)]+)\)$/)?.[1] || "";
-  context.fillStyle = "#fff"; context.fillRect(0, 0, width, height);
+  context.fillStyle = theme.panel; context.fillRect(0, 0, width, height);
   context.font = "10px system-ui"; context.lineWidth = 1;
   for (let tick = 0; tick <= 4; tick++) {
     const value = bounds.y.min + tick * (bounds.y.max - bounds.y.min) / 4;
-    context.strokeStyle = "#e5ebe7"; context.beginPath(); context.moveTo(area.left, y(value)); context.lineTo(area.right, y(value)); context.stroke();
-    context.fillStyle = "#52615e"; context.textAlign = "right"; context.fillText(formatAnalysisValue(value, yUnit), area.left - 5, y(value) + 3);
+    context.strokeStyle = theme.grid; context.beginPath(); context.moveTo(area.left, y(value)); context.lineTo(area.right, y(value)); context.stroke();
+    context.fillStyle = theme.text; context.textAlign = "right"; context.fillText(formatAnalysisValue(value, yUnit), area.left - 5, y(value) + 3);
     const xv = bounds.x.min + tick * (bounds.x.max - bounds.x.min) / 4;
     context.textAlign = "center"; context.fillText(formatAnalysisValue(xv, xUnit), x(xv), area.bottom + 15);
   }
-  const colors = ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#d47729"];
+  const colors = theme.curves;
   plot.series.forEach((curve, index) => {
     context.strokeStyle = context.fillStyle = colors[index % colors.length];
     context.lineWidth = 1.6; context.beginPath();
@@ -153,7 +168,7 @@ function drawAnalysisChart(canvas, plot) {
     });
     context.stroke();
   });
-  context.fillStyle = "#52615e"; context.textAlign = "center";
+  context.fillStyle = theme.text; context.textAlign = "center";
   context.fillText(plot.x_label, width / 2, 214);
   context.save(); context.translate(12, 95); context.rotate(-Math.PI / 2);
   context.fillText(plot.y_label, 0, 0); context.restore();

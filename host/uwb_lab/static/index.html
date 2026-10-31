@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UWB Lab</title>
   <link rel="stylesheet" href="/app.css">
+  <script>try { if (localStorage.getItem("uwb-theme") === "light") document.documentElement.dataset.theme = "light"; } catch {}</script>
 </head>
 <body>
   <header class="topbar">
-    <h1>UWB Lab</h1>
+    <div class="brand">
+      <h1>UWB Lab</h1>
+      <button id="theme-toggle" class="theme-toggle" type="button" title="Switch to light mode" aria-label="Switch to light mode">☀</button>
+    </div>
     <div class="connection">
       <span id="status-dot" class="status-dot"></span>
       <span id="connection-label">Connecting</span>
@@ -47,8 +51,7 @@
           <label class="check"><input id="secondary-plot" type="checkbox">Show Plot 2</label>
           <form id="recording-form" class="recording-form" aria-label="Recording">
             <input name="name" maxlength="80" value="experiment" aria-label="Session name" title="Session name">
-            <button id="record-button" type="submit">Record</button>
-            <span id="recording-state" class="source-label">Stopped</span>
+            <button id="record-button" type="submit">REC</button>
           </form>
         </div>
         <p id="settings-error" class="error" role="alert" hidden></p>
@@ -132,8 +135,12 @@
         </section>
         <canvas id="residual-chart" aria-label="Plot 2: distance on left axis, error on right axis"></canvas>
       </div>
+      <div class="plot-block">
+        <div class="plot-heading">
+          <h2>Noise analysis</h2>
+          <span id="analysis-state" role="status">No dataset selected</span>
+        </div>
       <section class="analysis-panel" aria-label="Noise analysis workspace">
-        <div class="section-title"><h2>Noise analysis</h2><span id="analysis-state" role="status">No dataset selected</span></div>
         <div class="analysis-selection">
           <label>Dataset<select id="analysis-dataset"><option value="">Current batch</option></select></label>
           <label>Scope<select id="analysis-scope"><option value="batch">All runs (all samples)</option><option value="current">Latest / current run</option></select></label>
@@ -149,6 +156,7 @@
         <h2 class="comparison-title">Run comparison</h2>
         <div id="run-comparison" class="table-scroll"></div>
       </section>
+      </div>
     </section>
 
     <aside id="experiment-controls" class="controls">
@@ -224,7 +232,8 @@
       <section>
         <details id="experiment-panel" class="control-panel" open>
         <summary><h2>Experiment setup</h2><span id="prior-revision">No prior</span></summary>
-        <h3 class="subsection">Geometry prior</h3>
+        <details class="subpanel" open>
+        <summary class="subsection">Geometry prior</summary>
         <form id="prior-form">
               <label>Input mode
                 <select id="prior-mode" name="mode">
@@ -264,10 +273,12 @@
               <label>Note
                 <input name="note" maxlength="200" placeholder="e.g. clear LOS at 2 m">
               </label>
-              <button type="submit">Apply prior</button>
+              <button type="submit">Apply</button>
               <p id="prior-error" class="error" role="alert" hidden></p>
             </form>
-        <h3 class="subsection">Batch</h3>
+        </details>
+        <details class="subpanel" open>
+        <summary class="subsection">Batch</summary>
         <form id="experiment-form">
           <fieldset id="experiment-fields" class="form-fields">
             <label>Batch name<input name="name" value="Static LOS" maxlength="80"></label>
@@ -283,6 +294,7 @@
           <p id="experiment-prior" class="plot-note">Set a distance or position prior above. <button type="button" class="info" data-tip="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis." aria-label="Prior and radio settings are locked for the whole batch. Interval measurements are saved but excluded from run analysis.">i</button></p>
           <button id="experiment-start" type="submit">Start batch</button>
         </form>
+        </details>
         </details>
       </section>
       <section>

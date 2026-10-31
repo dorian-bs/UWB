@@ -4,17 +4,17 @@
 
 /* ---------- 1. Tokens & base ---------- */
 :root {
-  --ink: #172321;
-  --muted: #52615e;
-  --paper: #f4f6f5;
-  --panel: #fff;
-  --line: #cfd7d3;
-  --green: #087f5b;
-  --red: #b63036;
-  --blue: #176b87;
+  --ink: #e4ebe8;
+  --muted: #9aaaa5;
+  --paper: #101614;
+  --panel: #18201e;
+  --line: #2c3834;
+  --green: #0b8f68;
+  --red: #c4414a;
+  --blue: #4fb3d1;
   --radius: 5px;
   --radius-lg: 8px;
-  --shadow: 0 1px 3px rgba(23, 35, 33, .06);
+  --shadow: 0 1px 3px rgba(0, 0, 0, .4);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -77,6 +77,13 @@ form { display: grid; gap: 8px; }
 form button { color: white; background: var(--green); border-color: var(--green); }
 form button:hover { background: #066e4f; }
 button.stop { background: var(--red); border-color: var(--red); }
+button.stop:hover { background: #9c2e36; border-color: #9c2e36; }
+button.record-button { position: relative; flex: none; width: 22px; height: 22px; min-width: 0; padding: 0; border-radius: 6px; background: #fff; border: 1.5px solid #c9ced6; box-shadow: 0 1px 2px rgba(0,0,0,.12); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+button.record-button::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--red); transition: inset .15s, border-radius .15s; }
+button.record-button:hover { border-color: var(--red); }
+button.record-button.stop { background: #fff; border-color: var(--red); animation: rec-pulse 1.4s ease-out infinite; }
+button.record-button.stop::after { inset: 5px; border-radius: 2px; }
+@keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,.45); } 100% { box-shadow: 0 0 0 7px rgba(220,38,38,0); } }
 .form-fields { display: grid; gap: 8px; }
 .form-fields > details > .form-fields { margin-top: 8px; }
 .coordinate-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
@@ -99,12 +106,20 @@ button.stop { background: var(--red); border-color: var(--red); }
 .plot-controls { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; box-shadow: var(--shadow); }
 .series-controls { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .series-controls label, .check { display: flex; align-items: center; gap: 6px; }
-.series-controls label { font-weight: 600; }
+.series-controls label { font-weight: 600; --cb: currentColor; padding: 3px 10px 3px 7px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; transition: background-color .12s, border-color .12s; }
+.series-controls label:hover { background: rgba(255, 255, 255, .05); }
+.series-controls label:has(:checked) { border-color: color-mix(in srgb, currentColor 55%, transparent); background: color-mix(in srgb, currentColor 14%, transparent); }
+input[type="checkbox"] { appearance: none; -webkit-appearance: none; display: inline-grid; place-content: center; flex: none; width: 15px; height: 15px; background: #121a17; border: 1.5px solid #4a5a55; border-radius: 3px; cursor: pointer; transition: background-color .12s, border-color .12s; }
+input[type="checkbox"]::before { content: ""; width: 8px; height: 4px; margin-top: -2px; border-left: 2px solid #0c1110; border-bottom: 2px solid #0c1110; transform: rotate(-45deg) scale(0); transition: transform .12s; }
+input[type="checkbox"]:checked { background: var(--cb, var(--blue)); border-color: var(--cb, var(--blue)); }
+input[type="checkbox"]:checked::before { transform: rotate(-45deg) scale(1); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .plot-view-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; }
 .axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0 8px; }
 .axis-grid fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .axis-grid .check { grid-column: 1 / -1; }
 #view-state { color: var(--green); font-size: 12px; }
+#analysis-state { font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
 #view-state.paused { color: #855600; font-weight: 600; }
 canvas { display: block; width: 100%; height: var(--plot-height, 300px); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .plot-controls + canvas { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
@@ -143,10 +158,17 @@ canvas { display: block; width: 100%; height: var(--plot-height, 300px); backgro
 
 .subsection { margin: 10px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
 .subsection:first-of-type { margin-top: 0; }
+summary.subsection { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
+summary.subsection::-webkit-details-marker { display: none; }
+summary.subsection::before { content: "▸"; font-size: 11px; transition: transform .15s; }
+.subpanel[open] > summary.subsection::before { transform: rotate(90deg); }
+.subpanel { margin-top: 0; }
+.subpanel + .subpanel { margin-top: 8px; }
+.subpanel[open] > summary.subsection { margin-bottom: 6px; }
 .recording-form { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .recording-form input { width: 130px; }
 .recording-form span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recording-form button { white-space: nowrap; }
+.recording-form button { white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 
 /* Geometry prior: distance and uncertainty share a row */
 #prior-form { grid-template-columns: 1fr 1fr; align-items: end; }
@@ -202,7 +224,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .analysis-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 12px; margin-bottom: 10px; }
 .analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
 .analysis-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.analysis-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
 .analysis-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; }
 .analysis-context > .plot-note, .analysis-context > details { margin: 0; }
 .analysis-context > details { font-size: 11px; }
@@ -238,12 +260,11 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .analysis-table th { color: var(--muted); font-weight: 500; }
 
 /* ---------- 9. Responsive ---------- */
-@media (max-width: 1150px) { .analysis-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
-  .workspace { grid-template-columns: minmax(0, 1fr); }
-  .controls { width: 100%; }
+  .workspace:not(.controls-hidden) { grid-template-columns: minmax(0, 1fr) 260px; }
 }
 @media (max-width: 520px) {
+  .workspace, .workspace:not(.controls-hidden) { grid-template-columns: minmax(0, 1fr); }
   .analysis-selection { grid-template-columns: minmax(0, 1fr); }
   .topbar { align-items: start; flex-direction: column; padding: 8px; }
   .workspace { padding: 8px; gap: 8px; }
@@ -254,4 +275,52 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
   .analysis-card[data-method="statistics"] [data-key="p95_abs_m"] { flex-basis: 100%; }
   .metric-value strong { font-size: 19px; }
   .metric-tile--primary strong { font-size: 28px; }
+}
+
+/* ---------- 10. Theme: dark is the default; data-theme="light" restores the light palette ---------- */
+:root { color-scheme: dark; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ink: #172321; --muted: #52615e; --paper: #f4f6f5; --panel: #fff; --line: #cfd7d3;
+  --green: #087f5b; --red: #b63036; --blue: #176b87; --shadow: 0 1px 3px rgba(23, 35, 33, .06);
+}
+:root[data-theme="light"] input[type="checkbox"] { background: #fff; border-color: #9aa9a3; }
+:root[data-theme="light"] input[type="checkbox"]::before { border-color: #fff; }
+:root[data-theme="light"] .series-controls label:hover { background: rgba(0, 0, 0, .04); }
+.theme-toggle { min-height: 26px; width: 26px; padding: 0; font-size: 15px; line-height: 1; }
+.brand { display: flex; align-items: center; gap: 10px; }
+
+/* Night overrides; :where() keeps specificity unchanged so they behave as plain rules */
+:where(:root:not([data-theme="light"])) {
+.error { color: #ffb4ae; background: #3a1d1d; }
+.raw { color: #8fa7b8; }
+.corrected { color: #4fb3d1; }
+.expected { color: #e0a73a; }
+.residual { color: #ff6b72; }
+.bias { color: #b08fe0; }
+.spread { color: #3ecf9f; }
+input, select, button { border-color: #3d4b47; }
+input:disabled { background: #1a2220; color: #7d8985; }
+input:not([type="checkbox"]), select { background: #121a17; border-width: 0 0 1px; border-radius: 0; border-color: #3d4b47; }
+input:not([type="checkbox"]):focus, select:focus { border-color: var(--blue); }
+input:not([type="checkbox"]):disabled { background: #161e1b; }
+button, .control-panel > summary + * .badge, .info { background: #26312e; }
+button:hover, .info:hover, .info:focus-visible { background: #33423e; }
+button[aria-pressed="true"] { background: #4a3a10; border-color: #d99a1c; }
+form button:hover { background: #0a9a70; }
+#view-state.paused { color: #e0a73a; }
+.calibration-table th, .calibration-table td { border-bottom-color: #2c3834; }
+.calibration-table thead th, .analysis-badge, .analysis-metrics .metric-tile { background: #1f2a27; }
+#calibration-recommendation, .analysis-badge--method, .analysis-metrics .metric-tile--primary { background: #17303a; }
+.analysis-badge, .analysis-metrics .metric-tile, .analysis-method-details { border-color: #2c3834; }
+.analysis-badge--method, .analysis-metrics .metric-tile--primary { border-color: #2d5667; }
+.analysis-notice { background: #3d3216; color: #f0cf8a; }
+
+/* Header state labels ("No prior", "Idle") and batch progress bar */
+.control-panel > summary > span { background: #1f3a4a; color: #8fd3ea; border: 1px solid #2d5667; }
+.analysis-panel progress { accent-color: #e0a73a; }
+.analysis-panel progress { border: 0; background: #26312e; border-radius: 4px; overflow: hidden; }
+.analysis-panel progress::-webkit-progress-bar { background: #26312e; }
+.analysis-panel progress::-webkit-progress-value { background: linear-gradient(90deg, #4fb3d1, #8e7cf0); }
+.analysis-panel progress::-moz-progress-bar { background: linear-gradient(90deg, #4fb3d1, #8e7cf0); }
 }

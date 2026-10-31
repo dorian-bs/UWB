@@ -309,6 +309,9 @@ class BatchRunner:
             "run_count": len(self.meta["runs"]) if self.meta else 0,
             "elapsed_s": max(0, self.clock() - self.phase_started) if self.active else 0,
             "remaining_s": max(0, self.deadline - self.clock()) if self.active else 0,
+            "duration_s": self.meta["config"]["duration_s"] if self.meta else 0,
+            "interval_s": self.meta["config"]["interval_s"] if self.meta else 0,
+            "start_delay_s": self.meta["config"]["start_delay_s"] if self.meta else 0,
             "prior": self.meta["prior"] if self.meta else None,
             "error": self.meta["error"] if self.meta else None,
         }

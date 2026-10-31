@@ -330,7 +330,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
   class Element {
     constructor() {
       this.value = ""; this.textContent = ""; this.disabled = false;
-      this.events = {}; this.style = {setProperty() {}};
+      this.events = {}; this.dataset = {}; this.style = {setProperty() {}};
       this.classList = {toggle() {}, remove() {}};
       this.elements = {namedItem: (name) => byId(name)};
     }
@@ -364,6 +364,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
     setInterval: (callback) => ticks.push(callback), setTimeout() {},
     startExperimentPanel: () => ({update() {}}), startAnalysisPanel: () => ({update() {}}),
     formatAnalysisValue: (value) => Number.isFinite(value) ? String(value) : "--",
+    chartTheme: () => ({text: "", grid: "", zero: "", series: {}}),
     fetch: async (path, options) => {
       if (options.method === "POST") posts.push([path, JSON.parse(options.body || "{}")]);
       if (path === "/api/calibration/start") status.calibration = {

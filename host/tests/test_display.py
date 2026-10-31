@@ -9,27 +9,31 @@ from pathlib import Path
 
 
 class ControlPanelParser(HTMLParser):
+    """Collects element ids per <details id=...>; nested <details> add to every open ancestor."""
+
     def __init__(self) -> None:
         super().__init__()
         self.panels: dict[str, set[str]] = {}
         self.open_panels: set[str] = set()
-        self.current: str | None = None
+        self.stack: list[str | None] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
-        if tag == "details":
-            self.current = attributes.get("id")
-            if self.current:
-                self.panels[self.current] = set()
-                if "open" in attributes:
-                    self.open_panels.add(self.current)
         identifier = attributes.get("id")
-        if self.current and identifier:
-            self.panels[self.current].add(identifier)
+        if identifier:
+            for panel in self.stack:
+                if panel:
+                    self.panels[panel].add(identifier)
+        if tag == "details":
+            self.stack.append(identifier)
+            if identifier:
+                self.panels[identifier] = set()
+                if "open" in attributes:
+                    self.open_panels.add(identifier)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "details":
-            self.current = None
+        if tag == "details" and self.stack:
+            self.stack.pop()
 
 
 def test_experiment_panels_start_collapsed_and_contain_existing_controls() -> None:

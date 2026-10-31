@@ -1,10 +1,10 @@
 const SERIES = [
-  { key: "raw_m", family: "distance", color: "#536878", dash: [2, 3] },
-  { key: "corrected_m", family: "distance", color: "#176b87", dash: [] },
-  { key: "expected_m", family: "distance", color: "#966000", dash: [7, 4] },
-  { key: "residual_m", family: "error", color: "#b63036", dash: [] },
-  { key: "rolling_bias_m", family: "error", color: "#7851a9", dash: [7, 4] },
-  { key: "rolling_std_m", family: "error", color: "#087f5b", dash: [2, 3] },
+  { key: "raw_m", family: "distance", color: "#8fa7b8", dash: [2, 3] },
+  { key: "corrected_m", family: "distance", color: "#4fb3d1", dash: [] },
+  { key: "expected_m", family: "distance", color: "#e0a73a", dash: [7, 4] },
+  { key: "residual_m", family: "error", color: "#ff6b72", dash: [] },
+  { key: "rolling_bias_m", family: "error", color: "#b08fe0", dash: [7, 4] },
+  { key: "rolling_std_m", family: "error", color: "#3ecf9f", dash: [2, 3] },
 ];
 const DEFAULTS = {
   count: 180, height: 300, style: "lines", secondary: false, controls: true,
@@ -431,6 +431,7 @@ function startDashboard() {
   }
 
   function drawChart(canvas, samples, settings) {
+    const theme = chartTheme();
     const { selected, bounds } = getPlotData(samples, settings);
     const box = canvas.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
@@ -450,7 +451,7 @@ function startDashboard() {
       return pad.top + (max - value) * plotHeight / (max - min);
     };
     ctx.font = "11px ui-monospace, monospace";
-    ctx.fillStyle = "#52615e";
+    ctx.fillStyle = theme.text;
     ctx.textAlign = "left";
     if (hasDistance) ctx.fillText("Distance (m)", 4, 14);
     if (hasError) {
@@ -459,25 +460,26 @@ function startDashboard() {
     }
     for (let index = 0; index <= 4; index++) {
       const row = pad.top + index * plotHeight / 4;
-      ctx.strokeStyle = "#e0e6e2";
+      ctx.strokeStyle = theme.grid;
       ctx.beginPath(); ctx.moveTo(pad.left, row); ctx.lineTo(width - pad.right, row); ctx.stroke();
       for (const family of ["distance", "error"]) {
         if ((family === "distance" && !hasDistance) || (family === "error" && !hasError)) continue;
         const [min, max] = bounds[family];
         const left = family === "distance";
         ctx.textAlign = left ? "right" : "left";
-        ctx.fillStyle = "#52615e";
+        ctx.fillStyle = theme.text;
         ctx.fillText(format(max - (max - min) * index / 4), left ? pad.left - 7 : width - pad.right + 7, row + 4);
       }
     }
     ctx.save();
     ctx.beginPath(); ctx.rect(pad.left, pad.top, plotWidth, plotHeight); ctx.clip();
     if (hasError && bounds.error[0] <= 0 && bounds.error[1] >= 0) {
-      ctx.strokeStyle = "#83908b"; ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = theme.zero; ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(pad.left, y(0, "error")); ctx.lineTo(width - pad.right, y(0, "error")); ctx.stroke();
     }
     for (const series of selected) {
-      ctx.strokeStyle = series.color; ctx.fillStyle = series.color;
+      const color = theme.series[series.key] || series.color;
+      ctx.strokeStyle = color; ctx.fillStyle = color;
       ctx.lineWidth = 1.5; ctx.setLineDash(series.dash);
       if (settings.style !== "points") {
         ctx.beginPath();
@@ -498,7 +500,7 @@ function startDashboard() {
       }
     }
     ctx.restore();
-    ctx.fillStyle = "#52615e"; ctx.textAlign = "center";
+    ctx.fillStyle = theme.text; ctx.textAlign = "center";
     ctx.fillText(`Samples (oldest to newest): ${samples.length}`, width / 2, height - 7);
     if (samples.length) {
       ctx.textAlign = "left"; ctx.fillText("1", pad.left, height - 7);
@@ -554,8 +556,7 @@ function startDashboard() {
       byId("malformed-count").textContent = status.malformed_lines;
       byId("prior-revision").textContent = status.prior ? `Revision ${status.prior.revision}` : "No prior";
       recording = status.recording;
-      byId("recording-state").textContent = recording ? status.session : "Stopped";
-      byId("record-button").textContent = recording ? "Stop" : "Record";
+      byId("record-button").textContent = recording ? "STOP" : "REC";
       byId("record-button").classList.toggle("stop", recording);
       showError("error-message", status.last_error || "");
       updateRadioStatus(status);
@@ -770,6 +771,20 @@ function startDashboard() {
     }
   });
   window.addEventListener("resize", drawAll);
+  function applyTheme(light) {
+    document.documentElement.dataset.theme = light ? "light" : "dark";
+    const button = byId("theme-toggle");
+    button.textContent = light ? "\u263e" : "\u2600";
+    button.title = button.ariaLabel = light ? "Switch to night mode" : "Switch to light mode";
+  }
+  applyTheme(document.documentElement.dataset.theme === "light");
+  byId("theme-toggle").addEventListener("click", () => {
+    const light = document.documentElement.dataset.theme !== "light";
+    applyTheme(light);
+    try { localStorage.setItem("uwb-theme", light ? "light" : "dark"); } catch {}
+    drawAll();
+    window.dispatchEvent(new Event("resize"));
+  });
   syncControls(); drawAll(); renderCalibration(); connect(); refreshStatus();
   setInterval(refreshStatus, 1000);
 }

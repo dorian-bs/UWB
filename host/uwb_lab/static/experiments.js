@@ -18,6 +18,16 @@ function experimentPayload(fields) {
   };
 }
 
+function experimentTotalRemaining(state) {
+  const run = state.duration_s + state.start_delay_s;
+  const left = state.run_count - state.run_index;
+  const current = state.remaining_s;
+  if (state.phase === "run") return current + left * run + left * state.interval_s;
+  if (state.phase === "interval") return current + left * run + Math.max(0, left - 1) * state.interval_s;
+  if (state.phase === "delay") return current + state.duration_s + left * (run + state.interval_s);
+  return run + left * (run + state.interval_s);
+}
+
 function experimentLocked(experiment) {
   return experiment?.active === true;
 }
@@ -73,13 +83,13 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
         : "No batch started";
       if (locked && state.phase === "waiting") {
         byId("experiment-timing").textContent =
-          `Waiting for you to start run ${state.run_index}/${state.run_count}. Move the setup, then press the button.`;
+          `Waiting for you to start run ${state.run_index}/${state.run_count}. Move the setup, then press the button. Estimated total time once started: ${formatAnalysisValue(experimentTotalRemaining(state), "s")} s.`;
       } else if (locked && state.phase === "delay") {
         byId("experiment-timing").textContent =
           `Run ${state.run_index} starts in ${formatAnalysisValue(state.remaining_s, "s")} s. Get clear of the setup.`;
       } else if (locked) {
         byId("experiment-timing").textContent =
-          `${formatAnalysisValue(state.elapsed_s, "s")} s elapsed; ${formatAnalysisValue(state.remaining_s, "s")} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host.`;
+          `${formatAnalysisValue(state.elapsed_s, "s")} s elapsed; ${formatAnalysisValue(state.remaining_s, "s")} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host. Estimated total time left: ${formatAnalysisValue(experimentTotalRemaining(state), "s")} s.`;
       } else if (state.batch_id) {
         byId("experiment-timing").textContent = `Batch ${state.batch_id}: ${state.outcome}. Saved recordings remain available below.`;
       }
