@@ -611,6 +611,13 @@ typedef struct
     double last_distance_m;
     double last_distance_corrected_m;
     uint8_t range_valid;
+    uint32_t last_ipatov_power;
+    uint32_t last_ipatov_f1;
+    uint32_t last_ipatov_f2;
+    uint32_t last_ipatov_f3;
+    uint16_t last_ipatov_fp_index;
+    uint16_t last_ipatov_accum_count;
+    uint32_t last_cia_diag1;
 
     qorvo_stats_t cal_stats;
 } qorvo_link_ctx_t;
@@ -1207,14 +1214,25 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
         qorvo_log_printf("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
         qorvo_log_printf("  ds_twr.distance   = %.3f m\r\n", distance_m);
         qorvo_log_printf("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
-        qorvo_log_printf("{\"type\":\"range\",\"v\":1,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true,\"radio_revision\":%lu}\r\n",
-                 g_link.board_id,
-                 g_link.peer_board_id,
-                 (unsigned long)g_link.current_exchange_counter,
-                 (unsigned long)HAL_GetTick(),
-                 distance_m,
-                 corrected_distance_m,
-                 (unsigned long)qorvo_control_state()->revision);
+        qorvo_log_printf(
+            "{\"type\":\"range\",\"v\":2,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,"
+            "\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true,\"radio_revision\":%lu,"
+            "\"ipatov_power\":%lu,\"ipatov_f1\":%lu,\"ipatov_f2\":%lu,\"ipatov_f3\":%lu,"
+            "\"ipatov_fp_index\":%u,\"ipatov_accum_count\":%u,\"cia_diag1\":%lu}\r\n",
+            g_link.board_id,
+            g_link.peer_board_id,
+            (unsigned long)g_link.current_exchange_counter,
+            (unsigned long)HAL_GetTick(),
+            distance_m,
+            corrected_distance_m,
+            (unsigned long)qorvo_control_state()->revision,
+            (unsigned long)g_link.last_ipatov_power,
+            (unsigned long)g_link.last_ipatov_f1,
+            (unsigned long)g_link.last_ipatov_f2,
+            (unsigned long)g_link.last_ipatov_f3,
+            (unsigned int)g_link.last_ipatov_fp_index,
+            (unsigned int)g_link.last_ipatov_accum_count,
+            (unsigned long)g_link.last_cia_diag1);
 
 #if QORVO_CAL_ANT_DELAY_MODE
         qorvo_stats_add(&g_link.cal_stats, corrected_distance_m);
@@ -1478,6 +1496,15 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
         if ((g_link.role == QORVO_ROLE_TX) &&
             (g_link.state == QORVO_STATE_WAIT_REPORT) &&
             (counter == g_link.current_exchange_counter)) {
+            dwt_rxdiag_t diag = {0};
+            dwt_readdiagnostics(&diag);
+            g_link.last_ipatov_power = diag.ipatovPower;
+            g_link.last_ipatov_f1 = diag.ipatovF1;
+            g_link.last_ipatov_f2 = diag.ipatovF2;
+            g_link.last_ipatov_f3 = diag.ipatovF3;
+            g_link.last_ipatov_fp_index = diag.ipatovFpIndex;
+            g_link.last_ipatov_accum_count = diag.ipatovAccumCount;
+            g_link.last_cia_diag1 = diag.ciaDiag1;
 
             qorvo_log_ds_twr_result(rep_poll_rx_ts,
                                     rep_answer_tx_ts,
