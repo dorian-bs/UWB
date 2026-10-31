@@ -248,6 +248,17 @@ async def replay_source() -> AsyncIterator[str]:
                     }
                     if "radio_revision" in message:
                         compact["radio_revision"] = message["radio_revision"]
+                    for optional_key in (
+                        "ipatov_power",
+                        "ipatov_f1",
+                        "ipatov_f2",
+                        "ipatov_f3",
+                        "ipatov_fp_index",
+                        "ipatov_accum_count",
+                        "cia_diag1",
+                    ):
+                        if optional_key in message:
+                            compact[optional_key] = message[optional_key]
                     yield json.dumps(compact)
                     await asyncio.sleep(float(os.getenv("UWB_REPLAY_INTERVAL", "0.2")))
     finally:
