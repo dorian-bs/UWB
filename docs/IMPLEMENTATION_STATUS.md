@@ -1,6 +1,6 @@
 # Implementation Status
 
-Updated **2026-10-28**. This is a student research tool, not a production platform.
+Updated **2026-10-31**. This is a student research tool, not a production platform.
 The useful workflow is connect, check a prior, record repeatable runs, and inspect
 the noise before adding more models.
 
@@ -8,7 +8,7 @@ the noise before adding more models.
 
 | Area | Available |
 | --- | --- |
-| Firmware | Two STM32 DS-TWR roles (`TxDebug`/`RxDebug`); initiator publishes compact version-1 range telemetry |
+| Firmware | Two STM32 DS-TWR roles (`TxDebug`/`RxDebug`); initiator publishes compact version-2 range telemetry with additive DW3000 diagnostics |
 | Transport | Direct USB, dual USB, or the ESP32 single-client UART/TCP bridge |
 | Host | Demo and replay without boards; live acquisition, health counters, revisioned distance/3D-position priors |
 | Recording | NDJSON sessions with manifests, prior changes, and radio snapshots/events |
@@ -35,7 +35,7 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   full-selection/window-statistics merging. Cumulative and saved analysis now
   share the same recorded-data path.
 - Kept the useful lab features and hardware acknowledgement/rollback safeguards.
-  No firmware behavior or telemetry schema changed.
+  Core DS-TWR behavior is unchanged; telemetry schema now supports richer diagnostics for analysis.
 - Hardware sources require explicit local addresses/ports instead of guessed
   machine-specific defaults. Demo/replay remain hardware-free.
 - Dashboard smoke tests use fresh runtime state and pytest-managed temporary
@@ -50,8 +50,8 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   chain and any changed RF settings still need explicit lab validation.
 - Ranging defaults to roughly 1 Hz for bring-up. The 0.1-10 Hz command guard is
   not verified throughput or an accuracy claim.
-- Only the initiator publishes ranges. Debug text and JSON share output; no
-  RSSI/first-path/CIR diagnostics, boot IDs, or firmware build identity are recorded yet.
+- Only the initiator publishes ranges. Debug text and JSON share output; full
+  CIR snapshots, boot IDs, and firmware build identity are still not recorded.
 - Transport is not fully loss-aware. Parsed recordings cannot recover upstream
   losses or all original debug bytes. Radio revisions reset on reboot: start a
   new session after restarting a board.
@@ -72,7 +72,8 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
 
 1. Validate the complete hardware chain and collect fixed-distance LOS recordings.
 2. Calibrate antenna delays and compare bias/spread across a few distances.
-3. Add simple timestamped LOS/NLOS labels and useful DW3000 diagnostics when needed.
+3. Add simple timestamped LOS/NLOS labels and evaluate which additional diagnostics
+   beyond the v2 compact set are worth storing.
 4. Compare independent recordings using the existing analysis. Add a simple baseline
    before considering HMMs, GPs, neural models, or downstream localization.
 

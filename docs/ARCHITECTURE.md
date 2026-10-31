@@ -43,22 +43,22 @@ The host runs locally with demo, TCP, serial, dual-serial, or replay.
 Hardware addresses/ports must be configured explicitly. The HTTP server binds
 to localhost by default; the ESP32 bridge is trusted-lab-only.
 
-## Compact range telemetry, version 1
+## Compact range telemetry, versions 1 and 2
 
 The initiator emits one UTF-8 JSON line per successful exchange:
 
 ```json
-{"type":"range","v":1,"board":1,"peer":2,"seq":42,"time_ms":41000,"raw_m":2.1234,"corrected_m":2.1012,"valid":true}
+{"type":"range","v":2,"board":1,"peer":2,"seq":42,"time_ms":41000,"raw_m":2.1234,"corrected_m":2.1012,"valid":true,"radio_revision":5,"ipatov_power":123456,"ipatov_f1":1000,"ipatov_f2":2000,"ipatov_f3":3000,"ipatov_fp_index":512,"ipatov_accum_count":128,"cia_diag1":42}
 ```
 
 `raw_m` and `corrected_m` are metres; `time_ms` is device time in milliseconds.
 The host ignores non-JSON debug text and counts malformed JSON-like lines.
 It validates bounded, finite range values and adds a host UTC timestamp.
-Unknown fields can be ignored.
+Version 1 remains accepted for older captures. Version 2 adds required DW3000
+diagnostics fields to each range line.
 
-Optional additive `radio_revision` is a uint32 identifying the active firmware
-configuration. It is preserved by parsing, recording, and replay without changing
-v1. Revisions reset on boot; record restarted boards as separate sessions until
+`radio_revision` is a uint32 identifying the active firmware configuration.
+Revisions reset on boot; record restarted boards as separate sessions until
 boot IDs exist.
 
 Raw data is immutable. Corrections produce separate values/files and must

@@ -27,6 +27,12 @@ Run independent repeat sessions rather than one long mixed recording:
 | Dynamic geometry | Repeatable motion with independent reference; constant speed, stop/start, approach/recede; separate geometry and obstruction changes | Distinguish model lag/geometry error from radio noise |
 | Generalization | Change room/layout, mounting, day, obstruction placement; seal sessions from model selection | Deployment-shift robustness |
 
+Minimum campaign quality gates before interpreting model outputs:
+
+- Keep at least three independently restarted sessions per condition.
+- Reject runs where diagnostics coverage in accepted samples is below 95%.
+- Track malformed-line rate per run and investigate outliers before fitting.
+
 ## Ground truth and priors
 
 Measured distance with instrument uncertainty may be ground truth. Tape marks, robot odometry,
@@ -87,6 +93,9 @@ classes. AIC/BIC on the fitted dataset are exploratory model diagnostics, not
 held-out classification performance. The default demo varies geometry and is
 not stationary sensor-noise ground truth. Independent recordings and the
 session-grouped evaluation rules below are still necessary for research claims.
+
+When telemetry version 2 diagnostics are present, keep the same run-selection
+rules and report diagnostic coverage alongside residual statistics.
 
 ## Radio and sampling parameter reference
 
