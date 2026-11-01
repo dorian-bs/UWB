@@ -112,6 +112,30 @@ V2_DIAGNOSTIC_FIELDS: dict[str, tuple[int, int]] = {
 }
 
 
+# DW3000 User Manual 4.7.2/4.7.3 constant for a 64 MHz PRF. Assumed, not read from the radio.
+RX_LEVEL_OFFSET_DB = 121.7
+
+
+def derive_diagnostics(sample: dict[str, Any]) -> dict[str, float | None]:
+    """Derive power metrics (dB) from raw v2 diagnostics. Raw fields are left untouched.
+
+    fp_gap_db = RX power - first-path power. A large gap means the first path is weak
+    compared to the total energy, which is the usual multipath / NLOS indicator.
+    """
+    count = sample.get("ipatov_accum_count")
+    if not count:
+        return {"rx_power_dbm": None, "fp_power_dbm": None, "fp_gap_db": None}
+    rx_power = None
+    fp_power = None
+    if sample["ipatov_power"] > 0:
+        rx_power = 10 * math.log10(sample["ipatov_power"] * 2**21 / count**2) - RX_LEVEL_OFFSET_DB
+    fp_energy = sample["ipatov_f1"] ** 2 + sample["ipatov_f2"] ** 2 + sample["ipatov_f3"] ** 2
+    if fp_energy > 0:
+        fp_power = 10 * math.log10(fp_energy / count**2) - RX_LEVEL_OFFSET_DB
+    gap = rx_power - fp_power if rx_power is not None and fp_power is not None else None
+    return {"rx_power_dbm": rx_power, "fp_power_dbm": fp_power, "fp_gap_db": gap}
+
+
 def parse_range_line(line: str) -> dict[str, Any] | None:
     line = line.strip()
     if not line.startswith("{") or len(line) > 2048:
@@ -196,6 +220,8 @@ class LabState:
                 self.ignored_lines += 1
             return None
 
+        if sample["v"] == 2:
+            sample.update(derive_diagnostics(sample))
         sequence = sample["seq"]
         if self.last_sequence is not None and sequence > self.last_sequence + 1:
             self.sequence_gaps += sequence - self.last_sequence - 1

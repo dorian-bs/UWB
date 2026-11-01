@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from .analysis import METHODS, AnalysisRequest
 from .analysis_jobs import AnalysisService
 from .calibration import CalibrationApplyInput, CalibrationCapture, CalibrationInput
-from .core import LabState, SessionRecorder
+from .core import RX_LEVEL_OFFSET_DB, LabState, SessionRecorder
 from .experiments import BatchInput, BatchRunner
 from .radio import ControlError, RadioConfig, RadioControl, SampleRate, SerialBoard
 
@@ -164,10 +164,15 @@ async def demo_source() -> AsyncIterator[str]:
         sequence += 1
         elapsed = time.monotonic() - started
         true_distance = 2.0 + 0.25 * math.sin(elapsed / 8)
-        measured = true_distance + random.gauss(0, 0.025)
+        multipath = random.random() < 0.15
+        measured = true_distance + random.gauss(0, 0.025) + (abs(random.gauss(0, 0.12)) if multipath else 0.0)
+        count = 128
+        rx_dbm = random.gauss(-80, 0.7)
+        fp_dbm = rx_dbm - (random.uniform(7, 14) if multipath else random.uniform(1, 4))
+        fp_amplitude = math.sqrt(count**2 * 10 ** ((fp_dbm + RX_LEVEL_OFFSET_DB) / 10) / 3)
         message = {
             "type": "range",
-            "v": 1,
+            "v": 2,
             "board": 1,
             "peer": 2,
             "seq": sequence,
@@ -175,6 +180,13 @@ async def demo_source() -> AsyncIterator[str]:
             "raw_m": measured,
             "corrected_m": measured,
             "valid": True,
+            "ipatov_power": int(count**2 / 2**21 * 10 ** ((rx_dbm + RX_LEVEL_OFFSET_DB) / 10)),
+            "ipatov_f1": int(fp_amplitude),
+            "ipatov_f2": int(fp_amplitude),
+            "ipatov_f3": int(fp_amplitude),
+            "ipatov_fp_index": 0,
+            "ipatov_accum_count": count,
+            "cia_diag1": 0,
         }
         yield json.dumps(message)
         await asyncio.sleep(0.2)

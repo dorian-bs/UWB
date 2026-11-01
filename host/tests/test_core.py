@@ -59,6 +59,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(sample["v"], 2)
         self.assertEqual(sample["ipatov_power"], 123456)
 
+    def test_derives_power_diagnostics_without_touching_raw_fields(self) -> None:
+        state = LabState()
+        sample = state.add_line(VALID_LINE_V2)
+        # 10*log10(123456 * 2^21 / 128^2) - 121.7 and 10*log10((1e6+4e6+9e6) / 128^2) - 121.7
+        self.assertAlmostEqual(sample["rx_power_dbm"], -49.71, places=1)
+        self.assertAlmostEqual(sample["fp_power_dbm"], -92.38, places=1)
+        self.assertAlmostEqual(sample["fp_gap_db"], sample["rx_power_dbm"] - sample["fp_power_dbm"])
+        self.assertEqual(sample["ipatov_power"], 123456)
+        self.assertNotIn("rx_power_dbm", state.add_line(VALID_LINE))
+
+    def test_power_diagnostics_are_none_for_empty_accumulator(self) -> None:
+        line = json.loads(VALID_LINE_V2)
+        line["ipatov_accum_count"] = 0
+        sample = LabState().add_line(json.dumps(line))
+        self.assertIsNone(sample["fp_gap_db"])
+
     def test_rejects_v2_when_diagnostics_missing_or_invalid(self) -> None:
         missing = json.loads(VALID_LINE_V2)
         del missing["ipatov_f1"]

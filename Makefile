@@ -2,7 +2,7 @@ PY := .venv/bin/python
 
 .PHONY: help setup check verify lint fmt test demo replay build \
         esp-config esp-build esp-flash \
-        stm-tx-flash stm-rx-flash stm-tx-dfu-flash stm-rx-dfu-flash
+        stm-tx-flash stm-rx-flash stm-tx-dfu-flash stm-rx-dfu-flash stm-dfu-flash
 
 help:
 	@echo "No hardware needed:"
@@ -23,6 +23,7 @@ help:
 	@echo "  make stm-rx-flash   Flash the connected STM32 as responder"
 	@echo "  make stm-tx-dfu-flash Flash STM32 TX over USB DFU bootloader"
 	@echo "  make stm-rx-dfu-flash Flash STM32 RX over USB DFU bootloader"
+	@echo "  make stm-dfu-flash  Flash both STM32 boards (TX + RX) over USB DFU at once"
 
 setup:
 	bash scripts/setup_macos.sh
@@ -69,6 +70,9 @@ stm-rx-flash:
 
 stm-tx-dfu-flash:
 	cd epuck-stm32-main && bash scripts/stm32_flash_usb_dfu.sh TxDebug
+
+stm-dfu-flash:
+	cd epuck-stm32-main && bash scripts/stm32_flash_usb_dfu_both.sh
 
 stm-rx-dfu-flash:
 	cd epuck-stm32-main && bash scripts/stm32_flash_usb_dfu.sh RxDebug

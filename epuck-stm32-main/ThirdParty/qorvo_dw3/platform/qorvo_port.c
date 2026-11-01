@@ -249,6 +249,9 @@ int32_t qorvo_configure_radio_default(void)
 
     qorvo_spi_set_fastrate();
 
+    /* Without this the CIA leaves the Ipatov power/F1-F3/accumulator registers at 0. */
+    dwt_configciadiag(DW_CIA_DIAG_LOG_ALL);
+
     tx_ant_dly = qorvo_get_tx_ant_dly();
     rx_ant_dly = qorvo_get_rx_ant_dly();
     dwt_settxantennadelay(tx_ant_dly);

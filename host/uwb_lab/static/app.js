@@ -5,6 +5,9 @@ const SERIES = [
   { key: "residual_m", family: "error", color: "#ff6b72", dash: [] },
   { key: "rolling_bias_m", family: "error", color: "#b08fe0", dash: [7, 4] },
   { key: "rolling_std_m", family: "error", color: "#3ecf9f", dash: [2, 3] },
+  { key: "rx_power_dbm", family: "power", color: "#6cb4f0", dash: [] },
+  { key: "fp_power_dbm", family: "power", color: "#f0b45a", dash: [] },
+  { key: "fp_gap_db", family: "power", color: "#ff8a7a", dash: [7, 4] },
 ];
 const DEFAULTS = {
   count: 180, height: 300, style: "lines", secondary: false, controls: true,
@@ -81,10 +84,11 @@ function axisBounds(values, axis, includeZero = false) {
 function getPlotData(samples, settings) {
   const selected = SERIES.filter((s) => settings.series.includes(s.key));
   const bounds = {};
-  for (const family of ["distance", "error"]) {
+  for (const family of ["distance", "error", "power"]) {
+    // The dB axis has no user limits: it always autoscales.
     bounds[family] = axisBounds(
       selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
-      settings[family], family === "error",
+      family === "power" ? { auto: true } : settings[family], family === "error",
     );
   }
   return { selected, bounds };
@@ -159,7 +163,7 @@ function calibrationSummary(state) {
   if (corrected.count < 2) {
     return {
       ready: false,
-      message: `Not enough data: captured ${corrected.count} valid corrected sample(s); need at least 2.`,
+      message: `Not enough data: ${corrected.count} sample(s), need 2.`,
       direction: "none",
       errorM: Number.NaN,
       corrected,
@@ -171,8 +175,8 @@ function calibrationSummary(state) {
   return {
     ready: true,
     message: direction === "none"
-      ? `Within tolerance (±${state.toleranceM.toFixed(3)} m); no antenna-delay change suggested.`
-      : `Recommendation: ${direction} TX/RX antenna delays equally on both boards.`,
+      ? `Within ±${state.toleranceM.toFixed(3)} m; no change.`
+      : `${direction === "increase" ? "Increase" : "Decrease"} antenna delays on both boards.`,
     direction,
     errorM,
     corrected,
@@ -219,7 +223,7 @@ function resolveCalibrationStatusMessage({ statusNote = "", stickyNote = "", has
   if (statusNote) return statusNote;
   if (stickyNote) return stickyNote;
   if (hasActivity) return recommendation;
-  return "Start capture to compute a recommendation.";
+  return "Start a capture.";
 }
 
 function radioPayload(fields) {
@@ -258,20 +262,20 @@ function hardwareCalibrationView(status, capture) {
     return blocked("Update firmware on both boards to enable antenna-delay readback and apply.");
   }
   if (status.experiment?.active) return blocked("Calibration is locked throughout an experiment.");
-  const result = { canStart: !capture?.active, canApply: false, message: "Start a fresh hardware capture to evaluate delays." };
+  const result = { canStart: !capture?.active, canApply: false, message: "Start a capture." };
   if (!capture?.id) return result;
-  if (capture.phase === "applied") return {...result, message: "Both boards acknowledged the new delays. Capture again to validate. Settings last until board restart."};
+  if (capture.phase === "applied") return {...result, message: "Delays applied. Capture again to validate."};
   if (capture.error) return {...result, message: capture.error};
-  if (capture.phase !== "ready") return {...result, message: `Hardware calibration: ${capture.phase}.`};
+  if (capture.phase !== "ready") return {...result, message: `Calibration: ${capture.phase}.`};
   if (["tx", "rx"].some((role) => Object.entries(capture.before[role]).some(([key, value]) =>
     boards[role].state[key] !== value))) return {...result, message: "Board settings changed; capture again."};
-  if (!capture.delta_dtu) return {...result, message: "No hardware change needed: within tolerance or below one DTU."};
+  if (!capture.delta_dtu) return {...result, message: "No change needed."};
   const targets = ["tx", "rx"].map((role) => {
     const old = capture.before[role], next = capture.proposed[role];
-    return `${role.toUpperCase()} board #${old.board}: TX ${old.tx_ant_dly} -> ${next.tx_ant_dly}, RX ${old.rx_ant_dly} -> ${next.rx_ant_dly}`;
+    return `${role.toUpperCase()} #${old.board}: ${old.tx_ant_dly}/${old.rx_ant_dly} → ${next.tx_ant_dly}/${next.rx_ant_dly}`;
   });
   return {...result, canApply: true,
-    message: `${capture.delta_dtu > 0 ? "+" : ""}${capture.delta_dtu} DTU to each of the four antenna-delay registers. ${targets.join("; ")}.`};
+    message: `${capture.delta_dtu > 0 ? "+" : ""}${capture.delta_dtu} DTU on all delays. ${targets.join("; ")}.`};
 }
 
 function startDashboard() {
@@ -440,11 +444,14 @@ function startDashboard() {
     const ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
     const width = box.width, height = box.height;
-    const pad = { top: 25, right: 65, bottom: 30, left: 65 };
-    const plotWidth = Math.max(1, width - pad.left - pad.right);
-    const plotHeight = height - pad.top - pad.bottom;
     const hasDistance = selected.some((s) => s.family === "distance");
     const hasError = selected.some((s) => s.family === "error");
+    const hasPower = selected.some((s) => s.family === "power");
+    // The dB axis sits on the right, outside the error axis when both are shown.
+    const pad = { top: 25, right: hasError && hasPower ? 125 : 65, bottom: 30, left: 65 };
+    const powerAxisX = width - pad.right + (hasError ? 62 : 7);
+    const plotWidth = Math.max(1, width - pad.left - pad.right);
+    const plotHeight = height - pad.top - pad.bottom;
     const x = (index) => pad.left + index * plotWidth / Math.max(samples.length - 1, 1);
     const y = (value, family) => {
       const [min, max] = bounds[family];
@@ -456,19 +463,26 @@ function startDashboard() {
     if (hasDistance) ctx.fillText("Distance (m)", 4, 14);
     if (hasError) {
       ctx.textAlign = "right";
-      ctx.fillText("Error (m)", width - 4, 14);
+      ctx.fillText("Error (m)", hasPower ? width - pad.right + 55 : width - 4, 14);
+    }
+    if (hasPower) {
+      ctx.textAlign = "right";
+      ctx.fillText("Power (dB)", width - 4, 14);
     }
     for (let index = 0; index <= 4; index++) {
       const row = pad.top + index * plotHeight / 4;
       ctx.strokeStyle = theme.grid;
       ctx.beginPath(); ctx.moveTo(pad.left, row); ctx.lineTo(width - pad.right, row); ctx.stroke();
-      for (const family of ["distance", "error"]) {
-        if ((family === "distance" && !hasDistance) || (family === "error" && !hasError)) continue;
+      for (const family of ["distance", "error", "power"]) {
+        if ((family === "distance" && !hasDistance) || (family === "error" && !hasError) ||
+            (family === "power" && !hasPower)) continue;
         const [min, max] = bounds[family];
         const left = family === "distance";
         ctx.textAlign = left ? "right" : "left";
         ctx.fillStyle = theme.text;
-        ctx.fillText(format(max - (max - min) * index / 4), left ? pad.left - 7 : width - pad.right + 7, row + 4);
+        const labelX = left ? pad.left - 7 : family === "power" ? powerAxisX : width - pad.right + 7;
+        const value = max - (max - min) * index / 4;
+        ctx.fillText(family === "power" ? value.toFixed(1) : format(value), labelX, row + 4);
       }
     }
     ctx.save();
@@ -521,6 +535,7 @@ function startDashboard() {
     for (const [id, key] of [
       ["range-value", "corrected_m"], ["expected-value", "expected_m"], ["residual-value", "residual_m"],
       ["bias-value", "rolling_bias_m"], ["spread-value", "rolling_std_m"],
+      ["rx-power-value", "rx_power_dbm"], ["fp-gap-value", "fp_gap_db"],
     ]) byId(id).textContent = format(last[key]);
     drawChart(byId("distance-chart"), samples, preferences);
     if (preferences.secondary) drawChart(byId("residual-chart"), view.visible(preferences.secondPlot.count), preferences.secondPlot);
@@ -586,7 +601,7 @@ function startDashboard() {
     const available = radioAvailable(radio);
     byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
     byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
-    byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} successful samples/s`;
+    byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} samples/s`;
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
@@ -595,9 +610,8 @@ function startDashboard() {
     const descriptions = ["tx", "rx"].map((role) => {
       const board = radio.boards[role], state = board.state;
       const lost = board.telemetry_dropped || 0;
-      if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}; USB lines discarded: ${lost}`;
-      const power = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
-      return `${role.toUpperCase()} #${state.board}: ch ${state.channel}, ${state.preamble} symbols, ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps, TX ${power}; ${(1000 / state.period_ms).toFixed(3)} Hz requested; rev ${state.revision}; antenna TX/RX ${state.tx_ant_dly ?? "--"}/${state.rx_ant_dly ?? "--"} DTU; ${state.running ? "running" : "PAUSED"}; USB lines discarded: ${lost}`;
+      if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}`;
+      return `${role.toUpperCase()} #${state.board}: ch ${state.channel} · ${state.preamble} sym · ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps · ${(1000 / state.period_ms).toFixed(1)} Hz · ant ${state.tx_ant_dly ?? "--"}/${state.rx_ant_dly ?? "--"} · ${state.running ? "running" : "PAUSED"}${lost ? ` · ${lost} lines lost` : ""}`;
     });
     byId("radio-state").textContent = descriptions.join("\n");
     if (radio.last_error) showError("radio-error", radio.last_error);
@@ -761,7 +775,7 @@ function startDashboard() {
       byId("radio-refresh").disabled = true;
       byId("radio-result").textContent = "Pausing ranging and applying settings to both boards...";
       await request("/api/radio", { method: "POST", body: JSON.stringify(payload) });
-      byId("radio-result").textContent = "Both boards acknowledged matching settings. Ranging resumed.";
+      byId("radio-result").textContent = "Settings applied.";
     } catch (error) {
       byId("radio-result").textContent = "Configuration not confirmed; inspect board states below.";
       showError("radio-error", error.message);

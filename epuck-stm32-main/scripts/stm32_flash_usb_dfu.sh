@@ -41,7 +41,12 @@ EOF
   exit 1
 fi
 
+DFU_ARGS=()
+if [[ -n "${DFU_PATH:-}" ]]; then
+  DFU_ARGS+=(-p "${DFU_PATH}")
+fi
+
 # DfuSe format address argument: <address>:leave resets and exits DFU mode after flash.
-dfu-util -a 0 -s "${FLASH_ADDR}:leave" -D "${TARGET_BIN}"
+dfu-util "${DFU_ARGS[@]}" -a 0 -s "${FLASH_ADDR}:leave" -D "${TARGET_BIN}"
 
 echo "Flashed ${TARGET_BIN} to ${FLASH_ADDR} via USB DFU."

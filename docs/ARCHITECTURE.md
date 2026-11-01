@@ -57,6 +57,15 @@ It validates bounded, finite range values and adds a host UTC timestamp.
 Version 1 remains accepted for older captures. Version 2 adds required DW3000
 diagnostics fields to each range line.
 
+For v2 lines the host derives, without touching the raw fields: `rx_power_dbm`
+(`10·log10(ipatov_power·2^21 / N²) − 121.7`), `fp_power_dbm`
+(`10·log10((f1²+f2²+f3²) / N²) − 121.7`) and `fp_gap_db` (RX minus first-path power),
+with `N = ipatov_accum_count`. The 121.7 dB offset is the DW3000 manual constant for a
+64 MHz PRF and is assumed, not read from the radio, so compare values relative to each
+other. A growing `fp_gap_db` means the direct path is weak compared with total energy
+(multipath / NLOS; the common rule of thumb is >6 dB suspicious, >10 dB likely NLOS).
+These are plottable on a third dB axis in Plot 1/2 and shown as live tiles.
+
 `radio_revision` is a uint32 identifying the active firmware configuration.
 Revisions reset on boot; record restarted boards as separate sessions until
 boot IDs exist.

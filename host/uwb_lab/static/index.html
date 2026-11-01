@@ -60,6 +60,14 @@
           <dd class="metric-value"><strong id="spread-value">--</strong><span class="metric-unit">m</span></dd>
           <dt>Rolling spread</dt>
         </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="rx-power-value">--</strong><span class="metric-unit">dBm</span></dd>
+          <dt>RX power</dt>
+        </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="fp-gap-value">--</strong><span class="metric-unit">dB</span></dd>
+          <dt title="RX power minus first-path power. Higher means a weaker direct path (multipath / NLOS).">RX - first-path gap</dt>
+        </div>
       </dl>
 
       <section class="display-controls" aria-label="Shared display settings">
@@ -88,6 +96,9 @@
           <label class="residual"><input type="checkbox" value="residual_m" checked>Residual</label>
           <label class="bias"><input type="checkbox" value="rolling_bias_m">Rolling bias</label>
           <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
+          <label class="rxpower"><input type="checkbox" value="rx_power_dbm">RX power</label>
+          <label class="fppower"><input type="checkbox" value="fp_power_dbm">First-path power</label>
+          <label class="fpgap"><input type="checkbox" value="fp_gap_db">RX - first-path gap</label>
         </fieldset>
         <details class="axis-settings">
           <summary>Plot 1 settings</summary>
@@ -128,6 +139,9 @@
             <label class="residual"><input type="checkbox" value="residual_m" checked>Residual</label>
             <label class="bias"><input type="checkbox" value="rolling_bias_m">Rolling bias</label>
             <label class="spread"><input type="checkbox" value="rolling_std_m">Rolling spread</label>
+            <label class="rxpower"><input type="checkbox" value="rx_power_dbm">RX power</label>
+            <label class="fppower"><input type="checkbox" value="fp_power_dbm">First-path power</label>
+            <label class="fpgap"><input type="checkbox" value="fp_gap_db">RX - first-path gap</label>
           </fieldset>
           <details class="axis-settings">
             <summary>Plot 2 settings</summary>
@@ -197,7 +211,7 @@
           </fieldset>
         </form>
         <button id="radio-refresh" type="button" disabled>Load current TX settings</button>
-        <p id="observed-rate" class="plot-note">-- successful samples/s</p>
+        <p id="observed-rate" class="plot-note">-- samples/s</p>
         <p id="radio-result" class="plot-note" role="status"></p>
         <p id="radio-state" class="plot-note" role="status">Waiting for source status...</p>
         <p id="radio-error" class="error" role="alert" hidden></p>
@@ -223,7 +237,7 @@
               <label>Tolerance (m)
                 <input id="calibration-tolerance" name="tolerance_m" type="number" min="0" step="0.001" value="0.010" required>
               </label>
-              <label>DTU/cm <button type="button" class="info" data-tip="Manual hint only; not used for hardware apply." aria-label="Manual hint only; not used for hardware apply.">i</button>
+              <label for="calibration-dtu-per-cm">DTU/cm <button type="button" class="info" data-tip="Manual hint only; not used for hardware apply." aria-label="Manual hint only; not used for hardware apply.">i</button>
                 <input id="calibration-dtu-per-cm" name="dtu_per_cm" type="number" min="0" step="1" value="0" inputmode="numeric">
               </label>
             </div>
@@ -241,7 +255,7 @@
             </tbody>
           </table>
           <p class="calibration-counts">Captured <b id="calibration-captured">0</b> · Skipped <b id="calibration-skipped">0</b> · Error <b id="calibration-error-m">--</b>&nbsp;m</p>
-          <p id="calibration-recommendation" class="calibration-note" role="status">Start capture to compute a recommendation.</p>
+          <p id="calibration-recommendation" class="calibration-note" role="status">Start a capture.</p>
           <p id="calibration-hardware" class="calibration-note" role="status">Hardware apply requires dual-serial mode.</p>
           <button id="calibration-apply" type="button" disabled>Apply evaluated delays to both boards</button>
           <p id="calibration-error" class="error" role="alert" hidden></p>

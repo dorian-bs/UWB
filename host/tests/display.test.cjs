@@ -106,7 +106,7 @@ test("calibration summary reports not-enough-data for fewer than 2 corrected sam
   api.calibrationConsumeSample(state, { valid: true, corrected_m: 2.02, raw_m: 2.04 });
   const summary = api.calibrationSummary(state);
   assert.equal(summary.ready, false);
-  assert.equal(summary.message, "Not enough data: captured 1 valid corrected sample(s); need at least 2.");
+  assert.equal(summary.message, "Not enough data: 1 sample(s), need 2.");
 });
 
 test("calibration summary recommendation text is explicit for increase/decrease/none", () => {
@@ -115,25 +115,25 @@ test("calibration summary recommendation text is explicit for increase/decrease/
   api.calibrationConsumeSample(increaseState, { valid: true, corrected_m: 2.03, raw_m: 2.05 });
   api.calibrationConsumeSample(increaseState, { valid: true, corrected_m: 2.04, raw_m: 2.06 });
   const increase = api.calibrationSummary(increaseState);
-  assert.equal(increase.message, "Recommendation: increase TX/RX antenna delays equally on both boards.");
+  assert.equal(increase.message, "Increase antenna delays on both boards.");
 
   const decreaseState = api.createCalibrationState();
   api.calibrationStart(decreaseState, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
   api.calibrationConsumeSample(decreaseState, { valid: true, corrected_m: 1.96, raw_m: 1.98 });
   api.calibrationConsumeSample(decreaseState, { valid: true, corrected_m: 1.97, raw_m: 1.99 });
   const decrease = api.calibrationSummary(decreaseState);
-  assert.equal(decrease.message, "Recommendation: decrease TX/RX antenna delays equally on both boards.");
+  assert.equal(decrease.message, "Decrease antenna delays on both boards.");
 
   const noneState = api.createCalibrationState();
   api.calibrationStart(noneState, { knownDistanceM: 2, targetSamples: 5, toleranceM: 0.01 });
   api.calibrationConsumeSample(noneState, { valid: true, corrected_m: 2.004, raw_m: 2.005 });
   api.calibrationConsumeSample(noneState, { valid: true, corrected_m: 2.006, raw_m: 2.007 });
   const none = api.calibrationSummary(noneState);
-  assert.equal(none.message, "Within tolerance (±0.010 m); no antenna-delay change suggested.");
+  assert.equal(none.message, "Within ±0.010 m; no change.");
 });
 
 test("calibration status message preserves sticky autostop notice when no new status note is passed", () => {
-  const recommendation = "Recommendation: increase TX/RX antenna delays equally on both boards.";
+  const recommendation = "Increase antenna delays on both boards.";
   const autostop = "Capture target reached. Review stats and recommendation below.";
   assert.equal(
     api.resolveCalibrationStatusMessage({
@@ -408,7 +408,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
   await byId("calibration-apply").events.click();
   assert.deepEqual(posts.at(-1), ["/api/calibration/apply", {id: "verified-capture"}]);
   assert.equal(byId("calibration-apply").disabled, true);
-  assert.match(byId("calibration-recommendation").textContent, /acknowledged/);
+  assert.match(byId("calibration-recommendation").textContent, /Delays applied/);
   await byId("calibration-reset").events.click();
   assert.equal(byId("calibration-captured").textContent, "0");
   assert.equal(byId("calibration-apply").disabled, true);
