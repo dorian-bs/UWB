@@ -120,7 +120,7 @@ input[type="checkbox"]:checked { background: var(--cb, var(--blue)); border-colo
 input[type="checkbox"]:checked::before { transform: rotate(-45deg) scale(1); }
 input[type="checkbox"]:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .plot-view-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; }
-.axis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0 8px; }
+.axis-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 10px 0 8px; }
 .axis-grid fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .axis-grid .check { grid-column: 1 / -1; }
 #view-state { color: var(--green); font-size: 12px; }

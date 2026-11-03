@@ -29,6 +29,20 @@ void qorvo_control_read(qorvo_radio_state_t *state)
     state->rx_ant_dly = hardware.rx_ant_dly;
 }
 
+static bool have_saved;
+static unsigned saves;
+static qorvo_radio_state_t saved_state;
+bool qorvo_settings_load(qorvo_radio_state_t *state)
+{
+    if (!have_saved) return false;
+    *state = saved_state;
+    return true;
+}
+bool qorvo_settings_save(const qorvo_radio_state_t *state)
+{
+    have_saved = true; saves++; saved_state = *state;
+    return true;
+}
 void qorvo_control_pause(void) { pauses++; }
 bool qorvo_control_resume(void) { resumes++; return !fail_resume; }
 
@@ -233,6 +247,28 @@ int main(void)
     feed("UWB 70 RESUME\n");
     expect("\"ok\":true");
     expect("\"running\":true,\"tx_ant_dly\":11111,\"rx_ant_dly\":22222");
+
+    /* Settings saved by the last successful SET are restored and applied at boot. */
+    assert(saves > 0 && saved_state.tx_ant_dly == 11111 && saved_state.rx_ant_dly == 22222);
+    saved_state.period_ms = 500; saved_state.channel = 5; saved_state.preamble = 256;
+    saved_state.data_rate = 850; saved_state.tx_power = 0x1234; saved_state.tx_ant_dly = 111;
+    saved_state.rx_ant_dly = 222;
+    unsigned boot_applies = applies;
+    qorvo_control_init(1, false);
+    assert(applies == boot_applies + 1);
+    feed("UWB 71 GET\n");
+    expect("\"revision\":0,\"period_ms\":500,\"channel\":5,\"preamble\":256");
+    expect("\"data_rate\":850,\"tx_power\":4660,\"running\":true");
+    expect("\"tx_ant_dly\":111,\"rx_ant_dly\":222");
+    fail_apply = true;
+    qorvo_control_init(1, false);
+    feed("UWB 72 RESUME\n");
+    expect("\"error\":\"radio_config_failed\"");
+    fail_apply = false;
+    saved_state.channel = 7;
+    boot_applies = applies;
+    qorvo_control_init(1, false);
+    assert(applies == boot_applies);
     puts("native control tests passed");
     return 0;
 }

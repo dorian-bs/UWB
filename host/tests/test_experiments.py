@@ -216,3 +216,17 @@ def test_start_delay_automatic(tmp_path):
     runner.advance()
     assert runner.status()["phase"] == "recording"
     runner.stop("stopped", "test")
+
+
+def test_repeated_batch_name_gets_a_number(tmp_path):
+    from uwb_lab.experiments import BatchInput
+
+    runner, _clock, prior = setup_runner(tmp_path)
+    names = []
+    for name in ("LOS", "LOS", "LOS", "NLOS"):
+        runner.start(
+            BatchInput(name=name, duration_s=10, run_count=1), source="demo", prior=prior, radio_snapshot=None
+        )
+        names.append(runner.load_batch(runner.status()["batch_id"])["config"]["name"])
+        runner.stop("stopped", None)
+    assert names == ["LOS", "LOS 2", "LOS 3", "NLOS"]

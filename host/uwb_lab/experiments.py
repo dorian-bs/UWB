@@ -60,6 +60,20 @@ class BatchRunner:
         if self.directory is not None:
             write_json_atomic(self.directory / "manifest.json", self.meta)
 
+    def _unique_name(self, name: str) -> str:
+        used = set()
+        for manifest in self.root.glob("*/manifest.json"):
+            try:
+                used.add(json.loads(manifest.read_text(encoding="utf-8"))["config"]["name"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        if name not in used:
+            return name
+        number = 2
+        while f"{name} {number}"[-80:] in used:
+            number += 1
+        return f"{name} {number}"[-80:]
+
     def start(
         self,
         payload: BatchInput,
@@ -70,6 +84,7 @@ class BatchRunner:
     ) -> dict[str, Any]:
         if self.active or self.recorder.active:
             raise ValueError("Another batch or recording is active")
+        payload = payload.model_copy(update={"name": self._unique_name(payload.name)})
         self.directory = self.root / uuid.uuid4().hex
         self.directory.mkdir(parents=True)
         self.prior = prior

@@ -1407,6 +1407,19 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
             (counter == g_link.current_exchange_counter)) {
             int32_t ret;
 
+            /* Read the diagnostics of the ANSWER frame, whose RX timestamp is part of the range.
+             * The REPORT frame that arrives later carries no timing, so its diagnostics say nothing
+             * about the quality of this measurement. */
+            dwt_rxdiag_t diag = {0};
+            dwt_readdiagnostics(&diag);
+            g_link.last_ipatov_power = diag.ipatovPower;
+            g_link.last_ipatov_f1 = diag.ipatovF1;
+            g_link.last_ipatov_f2 = diag.ipatovF2;
+            g_link.last_ipatov_f3 = diag.ipatovF3;
+            g_link.last_ipatov_fp_index = diag.ipatovFpIndex;
+            g_link.last_ipatov_accum_count = diag.ipatovAccumCount;
+            g_link.last_cia_diag1 = diag.ciaDiag1;
+
             g_link.peer_board_id = src_board_id;
             memcpy(g_link.answer_rx_ts, rx_ts, 5U);
 
@@ -1499,16 +1512,6 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
         if ((g_link.role == QORVO_ROLE_TX) &&
             (g_link.state == QORVO_STATE_WAIT_REPORT) &&
             (counter == g_link.current_exchange_counter)) {
-            dwt_rxdiag_t diag = {0};
-            dwt_readdiagnostics(&diag);
-            g_link.last_ipatov_power = diag.ipatovPower;
-            g_link.last_ipatov_f1 = diag.ipatovF1;
-            g_link.last_ipatov_f2 = diag.ipatovF2;
-            g_link.last_ipatov_f3 = diag.ipatovF3;
-            g_link.last_ipatov_fp_index = diag.ipatovFpIndex;
-            g_link.last_ipatov_accum_count = diag.ipatovAccumCount;
-            g_link.last_cia_diag1 = diag.ciaDiag1;
-
             qorvo_log_ds_twr_result(rep_poll_rx_ts,
                                     rep_answer_tx_ts,
                                     rep_final_rx_ts);

@@ -33,6 +33,14 @@ async def _settle(task: asyncio.Task[T]) -> tuple[T, bool]:
             cancelled = True
 
 
+# DW3000 TX_POWER register: one byte per frame section (STS, SHR, PHR, data); in each byte bits 1:0 are
+# the coarse gain and bits 7:2 the fine gain. These bytes come from the driver's channel-9 linear
+# table (dwt_txp_lut_p0_b7_c9, 0.25 dB per index, index 0 = maximum) at indices 0, 12, ..., 72, so the
+# presets are nominally 3 dB apart from 0 to -18 dB relative to the maximum. They are relative
+# steps, not calibrated dBm.
+TX_POWER_PRESETS = tuple(int(f"{byte:02X}" * 4, 16) for byte in (0xFE, 0x9E, 0x85, 0x4A, 0x3D, 0x48, 0x30))
+
+
 class RadioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +49,13 @@ class RadioConfig(BaseModel):
     preamble: Literal[64, 128, 256, 512, 1024]
     data_rate: Literal[850, 6800]
     tx_power: int = Field(ge=0, le=0xFFFFFFFF, strict=True)
+
+    @field_validator("tx_power")
+    @classmethod
+    def preset_power(cls, value: int) -> int:
+        if value not in TX_POWER_PRESETS:
+            raise ValueError("TX power must be one of the preset register values")
+        return value
 
     @field_validator("channel", "preamble", "data_rate", mode="before")
     @classmethod

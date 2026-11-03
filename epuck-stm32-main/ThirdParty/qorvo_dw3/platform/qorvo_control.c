@@ -103,6 +103,7 @@ static void command(void)
         } else {
             state = requested;
             config_failed = false;
+            (void)qorvo_settings_save(&state);
         }
     } else error = "invalid_command";
     acknowledge(id, error);
@@ -125,6 +126,21 @@ void qorvo_control_init(uint8_t board, bool responder)
     qorvo_control_reset_transport();
     config_failed = false;
     qorvo_control_read(&state);
+
+    qorvo_radio_state_t saved = state;
+    saved.revision = 1;
+    if (qorvo_settings_load(&saved) && valid(&saved)) {
+        qorvo_control_pause();
+        if (qorvo_control_apply(&saved)) {
+            state = saved;
+            state.revision = 0;
+            state.running = qorvo_control_resume();
+        } else {
+            config_failed = true;
+            state.running = false;
+        }
+        qorvo_control_read(&state);
+    }
 }
 
 size_t qorvo_control_receive(const uint8_t *data, size_t len)

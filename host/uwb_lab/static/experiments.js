@@ -22,10 +22,21 @@ function experimentTotalRemaining(state) {
   const run = state.duration_s + state.start_delay_s;
   const left = state.run_count - state.run_index;
   const current = state.remaining_s;
-  if (state.phase === "run") return current + left * run + left * state.interval_s;
+  if (state.phase === "recording") return current + left * run + left * state.interval_s;
   if (state.phase === "interval") return current + left * run + Math.max(0, left - 1) * state.interval_s;
   if (state.phase === "delay") return current + state.duration_s + left * (run + state.interval_s);
   return run + left * (run + state.interval_s);
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  return minutes ? `${minutes} min ${total % 60} s` : `${total} s`;
+}
+
+function formatProgress(elapsed, total) {
+  const done = Math.min(Math.round(elapsed), Math.round(total));
+  return Math.round(total) < 60 ? `${done} / ${formatDuration(total)}` : `${formatDuration(done)} / ${formatDuration(total)}`;
 }
 
 function experimentLocked(experiment) {
@@ -83,15 +94,15 @@ function startExperimentPanel({ request, showError, refreshStatus }) {
         : "No batch started";
       if (locked && state.phase === "waiting") {
         byId("experiment-timing").textContent =
-          `Waiting for you to start run ${state.run_index}/${state.run_count}. Move the setup, then press the button. Estimated total time once started: ${formatAnalysisValue(experimentTotalRemaining(state), "s")} s.`;
+          `Run ${state.run_index}/${state.run_count} waiting · ${formatDuration(experimentTotalRemaining(state))} total`;
       } else if (locked && state.phase === "delay") {
         byId("experiment-timing").textContent =
-          `Run ${state.run_index} starts in ${formatAnalysisValue(state.remaining_s, "s")} s. Get clear of the setup.`;
+          `Run ${state.run_index} starts in ${formatDuration(state.remaining_s)} · ${formatDuration(experimentTotalRemaining(state))} left`;
       } else if (locked) {
         byId("experiment-timing").textContent =
-          `${formatAnalysisValue(state.elapsed_s, "s")} s elapsed; ${formatAnalysisValue(state.remaining_s, "s")} s remaining in this ${state.phase === "interval" ? "interval" : "run"}. Saved on the host. Estimated total time left: ${formatAnalysisValue(experimentTotalRemaining(state), "s")} s.`;
+          `${formatProgress(state.elapsed_s, state.elapsed_s + state.remaining_s)} · ${formatDuration(experimentTotalRemaining(state))} left`;
       } else if (state.batch_id) {
-        byId("experiment-timing").textContent = `Batch ${state.batch_id}: ${state.outcome}. Saved recordings remain available below.`;
+        byId("experiment-timing").textContent = `Batch ${state.batch_id}: ${state.outcome}`;
       }
       const progress = byId("experiment-progress");
       progress.max = state.run_count || 1;

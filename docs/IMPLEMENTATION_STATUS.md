@@ -60,7 +60,7 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
 - Automatic repetitions do not reset physical conditions or establish independent
   experiments. Moving priors, condition sweeps, labels, and model evaluation are not implemented.
 - Calibration apply requires a one-time firmware update on both STM32 boards.
-  Settings reset on board restart; no flash/OTP persistence. Other sources remain
+  Each successful SET is saved to STM32 flash sector 11 (0x080E0000) and restored at boot; the UI loads the boards' values on page load. A DFU reflash keeps the saved record. Other sources remain
   suggestion-only. Validate the updated pair on fresh LOS runs and other distances.
   Native/virtual-USB tests do not establish on-hardware ranging accuracy.
 - ESP32 accepts one unauthenticated TCP client on a trusted lab network. Keep

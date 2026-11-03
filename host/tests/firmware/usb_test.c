@@ -26,6 +26,20 @@ void qorvo_control_read(qorvo_radio_state_t *state)
     state->channel=9; state->preamble=128; state->data_rate=6800; state->tx_power=7;
     state->tx_ant_dly=16380; state->rx_ant_dly=16380;
 }
+static bool have_saved;
+static unsigned saves;
+static qorvo_radio_state_t saved_state;
+bool qorvo_settings_load(qorvo_radio_state_t *state)
+{
+    if (!have_saved) return false;
+    *state = saved_state;
+    return true;
+}
+bool qorvo_settings_save(const qorvo_radio_state_t *state)
+{
+    have_saved = true; saves++; saved_state = *state;
+    return true;
+}
 void qorvo_control_pause(void) { pauses++; }
 bool qorvo_control_apply(const qorvo_radio_state_t *state) { (void)state; return true; }
 bool qorvo_control_resume(void) { return true; }

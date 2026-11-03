@@ -165,14 +165,14 @@ test("calibration status message preserves sticky autostop notice when no new st
 });
 
 test("radio form converts units and validates raw TX power without silent coercion", () => {
-  const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xA0A0A0A0" };
+  const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xFEFEFEFE" };
   assert.deepEqual(plain(api.radioPayload(fields)), {
-    sampling_hz: 5, channel: 9, preamble: 128, data_rate: 6800, tx_power: 0xA0A0A0A0,
+    sampling_hz: 5, channel: 9, preamble: 128, data_rate: 6800, tx_power: 0xFEFEFEFE,
   });
   for (const changes of [
     { sampling_hz: "" }, { sampling_hz: "0" }, { sampling_hz: "11" },
     { sampling_hz: "NaN" }, { channel: "7" }, { preamble: "65" }, { data_rate: "110" },
-    { tx_power: "" }, { tx_power: "-1" }, { tx_power: "0x123456789" }, { tx_power: "not hex" },
+    { tx_power: "" }, { tx_power: "0xA0A0A0A0" }, { tx_power: "-1" }, { tx_power: "0x123456789" }, { tx_power: "not hex" },
   ]) assert.throws(() => api.radioPayload({ ...fields, ...changes }));
 });
 

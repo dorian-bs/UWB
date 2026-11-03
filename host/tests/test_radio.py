@@ -23,7 +23,7 @@ def radio_module():
 
 def config(**changes):
     return radio_module().RadioConfig(
-        sampling_hz=5, channel=5, preamble=256, data_rate=850, tx_power=0x10101010, **changes
+        sampling_hz=5, channel=5, preamble=256, data_rate=850, tx_power=0x9E9E9E9E, **changes
     )
 
 
@@ -76,9 +76,8 @@ def pair(fail=None, recorder=None):
 def test_radio_validation_and_period_quantization():
     radio = radio_module()
     assert config().period_ms == 200
-    assert (
-        radio.RadioConfig(sampling_hz=3, channel=9, preamble=128, data_rate=6800, tx_power=0).period_ms == 333
-    )
+    slow = radio.RadioConfig(sampling_hz=3, channel=9, preamble=128, data_rate=6800, tx_power=0xFEFEFEFE)
+    assert slow.period_ms == 333
     for field, value in [
         ("sampling_hz", 0),
         ("sampling_hz", 10.01),
@@ -89,11 +88,23 @@ def test_radio_validation_and_period_quantization():
         ("tx_power", -1),
         ("tx_power", 2**32),
         ("tx_power", 1.2),
+        ("tx_power", 0xA0A0A0A0),
         ("channel", True),
     ]:
         payload = config().model_dump() | {field: value}
         with pytest.raises(ValidationError):
             radio.RadioConfig(**payload)
+
+
+def test_tx_power_presets_match_the_ui():
+    from pathlib import Path
+
+    static = Path(radio_module().__file__).parent / "static"
+    html, script = (static / "index.html").read_text(), (static / "app.js").read_text()
+    for value in radio_module().TX_POWER_PRESETS:
+        assert f'value="0x{value:08X}"' in html
+        assert f"0x{value:08X}" in script
+    assert html.count('value="0x') == len(radio_module().TX_POWER_PRESETS)
 
 
 def test_pair_applies_only_after_pausing_both_and_keeps_history():

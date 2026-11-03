@@ -232,10 +232,26 @@ data rate is not automatically a more accurate distance measurement.
 
 ### TX power register
 
-This field is the raw DW3000 `TX_POWER` register, entered as `0x` followed by up to
-eight hexadecimal digits. The host sends its unsigned integer value to the firmware.
-For example, `0xA0A0A0A0` is a register encoding, **not** a claim of a particular
-transmitted power, and it is not a recommended value for every board.
+This field is the raw DW3000 `TX_POWER` register, chosen from a fixed list of presets; the host
+rejects any other value. The register has one byte per frame section (STS, SHR, PHR, data); in each
+byte bits 1:0 are the coarse gain and bits 7:2 the fine gain. The presets repeat one byte in all four
+sections and come from the driver's channel-9 linear table (`dwt_txp_lut_p0_b7_c9`, 0.25 dB per index,
+index 0 = maximum) at indices 0, 12, ..., 72:
+
+| Preset | Nominal level vs. maximum |
+| --- | --- |
+| `0xFEFEFEFE` | 0 dB |
+| `0x9E9E9E9E` | -3 dB |
+| `0x85858585` | -6 dB |
+| `0x4A4A4A4A` | -9 dB |
+| `0x3D3D3D3D` | -12 dB |
+| `0x48484848` | -15 dB |
+| `0x30303030` | -18 dB |
+
+These levels are nominal and relative; they are **not** a claim of calibrated transmitted power
+(the driver switches PLL bias for the lower indices, which this register write does not do), so
+verify the actual received level with `rx_power_dbm`. A board left on another value, such as the
+firmware default `0xA0A0A0A0`, shows an empty selection until you pick a preset.
 
 The register contains packed hardware power-control fields rather than one linear
 amplitude number. A numerically larger hexadecimal value does not reliably mean

@@ -64,6 +64,10 @@ with `N = ipatov_accum_count`. The 121.7 dB offset is the DW3000 manual constant
 64 MHz PRF and is assumed, not read from the radio, so compare values relative to each
 other. A growing `fp_gap_db` means the direct path is weak compared with total energy
 (multipath / NLOS; the common rule of thumb is >6 dB suspicious, >10 dB likely NLOS).
+The diagnostics come from the ANSWER frame (the only measured frame the initiator receives); the
+POLL and FINAL frames are received by the responder and are not reported. Firmware before this
+change read them from the later REPORT frame, which carries no timing, so older v2 captures do
+not reflect the quality of the ranged frames.
 These are plottable on a third dB axis in Plot 1/2 and shown as live tiles.
 
 `radio_revision` is a uint32 identifying the active firmware configuration.
@@ -157,8 +161,9 @@ The extended `SET` includes absolute unsigned 16-bit TX/RX antenna-delay registe
 (0-65535 DTU); legacy `SET` preserves their current values. GET/ACK adds
 `tx_ant_dly` and `rx_ant_dly` read from the DW3000, without changing protocol v1.
 Missing delay fields identify older firmware and disable calibration apply only.
-Radio reconfiguration preserves the current delays; reboot restores compile-time
-defaults. There are no flash/OTP writes.
+Radio reconfiguration preserves the current delays; each successful SET is saved to flash sector 11
+(0x080E0000, magic + checksum) and re-applied at boot; an invalid record falls back to
+compile-time defaults. The UI imports the boards' values on page load.
 
 Acknowledgements and rejections include current board state:
 

@@ -34,4 +34,8 @@ bool qorvo_control_apply(const qorvo_radio_state_t *requested);
 bool qorvo_control_resume(void);
 bool qorvo_control_send(const char *data, size_t len);
 
+/* Non-volatile copy of the last applied settings (period, radio, delays). */
+bool qorvo_settings_load(qorvo_radio_state_t *state);
+bool qorvo_settings_save(const qorvo_radio_state_t *state);
+
 #endif

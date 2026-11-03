@@ -1,24 +1,26 @@
 const SERIES = [
-  { key: "raw_m", family: "distance", color: "#8fa7b8", dash: [2, 3] },
+  { key: "raw_m", family: "distance", color: "#8fa7b8", dash: [] },
   { key: "corrected_m", family: "distance", color: "#4fb3d1", dash: [] },
   { key: "expected_m", family: "distance", color: "#e0a73a", dash: [7, 4] },
   { key: "residual_m", family: "error", color: "#ff6b72", dash: [] },
-  { key: "rolling_bias_m", family: "error", color: "#b08fe0", dash: [7, 4] },
-  { key: "rolling_std_m", family: "error", color: "#3ecf9f", dash: [2, 3] },
+  { key: "rolling_bias_m", family: "error", color: "#b08fe0", dash: [] },
+  { key: "rolling_std_m", family: "error", color: "#3ecf9f", dash: [] },
   { key: "rx_power_dbm", family: "power", color: "#6cb4f0", dash: [] },
   { key: "fp_power_dbm", family: "power", color: "#f0b45a", dash: [] },
-  { key: "fp_gap_db", family: "power", color: "#ff8a7a", dash: [7, 4] },
+  { key: "fp_gap_db", family: "power", color: "#ff8a7a", dash: [] },
 ];
 const DEFAULTS = {
   count: 180, height: 300, style: "lines", secondary: false, controls: true,
   series: ["corrected_m", "expected_m", "residual_m"],
   distance: { auto: true, min: 0, max: 4 },
   error: { auto: true, min: -0.1, max: 0.1 },
+  power: { auto: true, min: -100, max: -60 },
   secondPlot: {
     count: 180, height: 300, style: "lines",
     series: ["residual_m"],
     distance: { auto: true, min: 0, max: 4 },
     error: { auto: true, min: -0.1, max: 0.1 },
+  power: { auto: true, min: -100, max: -60 },
   },
 };
 const STORAGE_KEY = "uwb-lab-display-v1";
@@ -57,7 +59,9 @@ function validatePlotPreferences(value, label) {
   if (!value || !Array.isArray(value.series) || value.series.some((key) => !SERIES.some((s) => s.key === key))) {
     throw new Error(`${label}: invalid trace selection.`);
   }
-  for (const family of ["distance", "error"]) {
+  // Preferences saved before the dB axis was adjustable have no power field.
+  if (value && value.power === undefined) value = { ...value, power: { ...DEFAULTS.power } };
+  for (const family of ["distance", "error", "power"]) {
     const axis = value[family];
     if (!axis || typeof axis.auto !== "boolean" || !Number.isFinite(axis.min) ||
         !Number.isFinite(axis.max) || axis.min >= axis.max || !Number.isFinite(axis.max - axis.min)) {
@@ -66,7 +70,7 @@ function validatePlotPreferences(value, label) {
   }
   return {
     series: [...new Set(value.series)],
-    distance: { ...value.distance }, error: { ...value.error },
+    distance: { ...value.distance }, error: { ...value.error }, power: { ...value.power },
   };
 }
 
@@ -85,10 +89,9 @@ function getPlotData(samples, settings) {
   const selected = SERIES.filter((s) => settings.series.includes(s.key));
   const bounds = {};
   for (const family of ["distance", "error", "power"]) {
-    // The dB axis has no user limits: it always autoscales.
     bounds[family] = axisBounds(
       selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
-      family === "power" ? { auto: true } : settings[family], family === "error",
+      settings[family], family === "error",
     );
   }
   return { selected, bounds };
@@ -226,6 +229,9 @@ function resolveCalibrationStatusMessage({ statusNote = "", stickyNote = "", has
   return "Start a capture.";
 }
 
+// Selectable TX_POWER register values, nominally 3 dB apart (see TX_POWER_PRESETS in radio.py).
+const TX_POWER_PRESETS = [0xFEFEFEFE, 0x9E9E9E9E, 0x85858585, 0x4A4A4A4A, 0x3D3D3D3D, 0x48484848, 0x30303030];
+
 function radioPayload(fields) {
   const payload = {};
   for (const key of ["sampling_hz", "channel", "preamble", "data_rate"]) {
@@ -233,8 +239,8 @@ function radioPayload(fields) {
     payload[key] = Number(fields[key]);
   }
   const power = String(fields.tx_power ?? "").trim();
-  if (!/^0x[0-9a-f]{1,8}$/i.test(power)) throw new Error("TX power must be a raw hexadecimal register, e.g. 0xA0A0A0A0.");
-  payload.tx_power = Number(power);
+  payload.tx_power = /^0x[0-9a-f]{1,8}$/i.test(power) ? Number(power) : NaN;
+  if (!TX_POWER_PRESETS.includes(payload.tx_power)) throw new Error("Choose one of the TX power presets.");
   if (!Number.isFinite(payload.sampling_hz) || payload.sampling_hz < 0.1 || payload.sampling_hz > 10 ||
       ![5, 9].includes(payload.channel) || ![64, 128, 256, 512, 1024].includes(payload.preamble) ||
       ![850, 6800].includes(payload.data_rate)) {
@@ -317,7 +323,7 @@ function startDashboard() {
       document.querySelectorAll(`#${prefix}series-controls input`).forEach((input) => {
         input.checked = settings.series.includes(input.value);
       });
-      for (const family of ["distance", "error"]) {
+      for (const family of ["distance", "error", "power"]) {
         byId(`${prefix}${family}-auto`).checked = settings[family].auto;
         for (const bound of ["min", "max"]) {
           byId(`${prefix}${family}-${bound}`).value = settings[family][bound];
@@ -350,7 +356,7 @@ function startDashboard() {
       style: byId(`${prefix}plot-style`).value,
       series: [...document.querySelectorAll(`#${prefix}series-controls input:checked`)].map((input) => input.value),
     };
-    for (const family of ["distance", "error"]) {
+    for (const family of ["distance", "error", "power"]) {
       const auto = byId(`${prefix}${family}-auto`).checked;
       candidate[family] = { auto };
       for (const bound of ["min", "max"]) {
@@ -488,7 +494,7 @@ function startDashboard() {
     ctx.save();
     ctx.beginPath(); ctx.rect(pad.left, pad.top, plotWidth, plotHeight); ctx.clip();
     if (hasError && bounds.error[0] <= 0 && bounds.error[1] >= 0) {
-      ctx.strokeStyle = theme.zero; ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = theme.zero; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(pad.left, y(0, "error")); ctx.lineTo(width - pad.right, y(0, "error")); ctx.stroke();
     }
     for (const series of selected) {
@@ -589,12 +595,66 @@ function startDashboard() {
       renderCalibration();
     }
   }
+  // Panel form values and open/closed state survive a page refresh (browser localStorage).
+  const PANEL_KEY = "uwb-lab-panels-v1";
+  const PANEL_FORMS = ["radio-form", "calibration-form", "prior-form", "experiment-form"];
+  function readPanelStore() {
+    try { return JSON.parse(localStorage.getItem(PANEL_KEY)) || {}; } catch { return {}; }
+  }
+  function writePanelStore(store) {
+    try { localStorage.setItem(PANEL_KEY, JSON.stringify(store)); } catch {}
+  }
+  function saveForm(form) {
+    const values = {};
+    for (const element of form.elements) {
+      if (!element.name || element.type === "submit" || element.type === "button") continue;
+      values[element.name] = element.type === "checkbox" ? element.checked : element.value;
+    }
+    const store = readPanelStore();
+    store.forms = { ...store.forms, [form.id]: values };
+    writePanelStore(store);
+  }
+  function restorePanelSettings() {
+    const store = readPanelStore();
+    for (const id of PANEL_FORMS) {
+      const saved = store.forms?.[id];
+      const form = byId(id);
+      if (!saved || !form) continue;
+      for (const [name, value] of Object.entries(saved)) {
+        const element = form.elements.namedItem(name);
+        if (!element || element.type === "submit" || element.type === "button") continue;
+        if (element.type === "checkbox") element.checked = value === true;
+        else if (typeof value === "string" && (element.tagName !== "SELECT" ||
+            [...element.options].some((option) => option.value === value))) element.value = value;
+      }
+    }
+    applyPriorMode();
+    const panels = [...document.querySelectorAll("details.control-panel, details.subpanel")];
+    panels.forEach((panel, index) => {
+      const open = store.panels?.[panel.id || `panel-${index}`];
+      if (typeof open === "boolean") panel.open = open;
+    });
+    for (const id of PANEL_FORMS) {
+      const form = byId(id);
+      form?.addEventListener("input", () => saveForm(form));
+      form?.addEventListener("change", () => saveForm(form));
+    }
+    panels.forEach((panel, index) => panel.addEventListener("toggle", () => {
+      const current = readPanelStore();
+      current.panels = { ...current.panels, [panel.id || `panel-${index}`]: panel.open };
+      writePanelStore(current);
+    }));
+  }
   function loadRadioFields(state) {
     const form = byId("radio-form");
     form.elements.namedItem("sampling_hz").value = (1000 / state.period_ms).toFixed(3);
     for (const key of ["channel", "preamble", "data_rate"]) form.elements.namedItem(key).value = state[key];
-    form.elements.namedItem("tx_power").value = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
+    const power = form.elements.namedItem("tx_power");
+    power.value = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
+    // A board left on a value outside the presets (e.g. the firmware default) shows the empty placeholder.
+    if (power.selectedIndex < 1) power.selectedIndex = 0;
     radioInitialized = true;
+    saveForm(form);
   }
   function updateRadioStatus(status) {
     const radio = status.radio;
@@ -606,7 +666,16 @@ function startDashboard() {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
     }
-    if (!radioInitialized && radio.boards.tx.state) loadRadioFields(radio.boards.tx.state);
+    if (!radioInitialized && radio.boards.tx.state) {
+      // The boards keep their last applied settings, so they win over the values stored in the page.
+      const radioValues = () => ["sampling_hz", "channel", "preamble", "data_rate", "tx_power"]
+        .map((name) => byId("radio-form").elements.namedItem(name).value).join("|");
+      const before = radioValues();
+      loadRadioFields(radio.boards.tx.state);
+      if (before !== radioValues()) {
+        byId("radio-result").textContent = "Loaded settings from the boards.";
+      }
+    }
     const descriptions = ["tx", "rx"].map((role) => {
       const board = radio.boards[role], state = board.state;
       const lost = board.telemetry_dropped || 0;
@@ -663,12 +732,14 @@ function startDashboard() {
   byId("toggle-controls").addEventListener("click", () => {
     preferences.controls = !preferences.controls; syncControls(); savePreferences(); drawAll();
   });
-  byId("prior-mode").addEventListener("change", (event) => {
-    const positions = event.target.value === "positions";
+  function applyPriorMode() {
+    const positions = byId("prior-mode").value === "positions";
     byId("distance-fields").hidden = positions;
     byId("position-fields").hidden = !positions;
     document.querySelector('[name="distance_m"]').required = !positions;
-  });
+  }
+  byId("prior-mode").addEventListener("change", applyPriorMode);
+  restorePanelSettings();
   byId("prior-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     showError("prior-error", "");
@@ -804,7 +875,7 @@ function startDashboard() {
 }
 
 if (typeof module !== "undefined") module.exports = {
-  DEFAULTS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
+  DEFAULTS, TX_POWER_PRESETS, validatePreferences, axisBounds, createViewState, getPlotData, radioPayload, radioAvailable,
   createCalibrationState, calibrationStart, calibrationConsumeSample, calibrationSummary, calibrationDirection,
   calibrationShouldStop, calibrationReset, calibrationInputs, resolveCalibrationStatusMessage,
   hardwareCalibrationView,

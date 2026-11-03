@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 data/sessions/
+docs/superpowers/
 
 # macOS
 .DS_Store

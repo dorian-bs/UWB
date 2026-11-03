@@ -82,7 +82,7 @@ The **Radio / sampling** panel offers:
 - Requested rate: 0.1-10 Hz (100-10000 ms period).
 - Channel: 5 or 9; preamble: 64, 128, 256, 512, or 1024 symbols.
 - Data rate: 850 kbps or 6.8 Mbps.
-- Raw TX-power register, in hexadecimal: **not dBm** and not a lab-approved power range.
+- TX power: one of seven preset `TX_POWER` register values, nominally 3 dB apart from the maximum down to -18 dB. They are relative steps, **not calibrated dBm** and not a lab-approved power range.
 
 These are physical radio settings. Demo, replay, TCP, and single-USB modes cannot
 apply them. The 10 Hz guard is not a verified throughput claim; requested rate and

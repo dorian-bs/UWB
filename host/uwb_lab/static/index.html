@@ -118,6 +118,11 @@
               <label>Minimum<input id="error-min" type="number" step="any" value="-0.1" disabled></label>
               <label>Maximum<input id="error-max" type="number" step="any" value="0.1" disabled></label>
             </fieldset>
+            <fieldset><legend>Power / dB axis (dB)</legend>
+              <label class="check"><input id="power-auto" type="checkbox" checked>Auto scale</label>
+              <label>Minimum<input id="power-min" type="number" step="any" value="-100" disabled></label>
+              <label>Maximum<input id="power-max" type="number" step="any" value="-60" disabled></label>
+            </fieldset>
           </div>
         </details>
         <p id="plot-error" class="error" role="alert" hidden></p>
@@ -160,6 +165,11 @@
                 <label class="check"><input id="second-error-auto" type="checkbox" checked>Auto scale (includes zero)</label>
                 <label>Minimum<input id="second-error-min" type="number" step="any" value="-0.1" disabled></label>
                 <label>Maximum<input id="second-error-max" type="number" step="any" value="0.1" disabled></label>
+              </fieldset>
+              <fieldset><legend>Power / dB axis (dB)</legend>
+                <label class="check"><input id="second-power-auto" type="checkbox" checked>Auto scale</label>
+                <label>Minimum<input id="second-power-min" type="number" step="any" value="-100" disabled></label>
+                <label>Maximum<input id="second-power-max" type="number" step="any" value="-60" disabled></label>
               </fieldset>
             </div>
           </details>
@@ -206,7 +216,7 @@
               <option value="512">512</option><option value="1024">1024</option>
             </select></label>
             <label>Data rate<select name="data_rate"><option value="850">850 kbps</option><option value="6800">6.8 Mbps</option></select></label>
-            <label>TX power register (both boards)<input name="tx_power" type="text" pattern="0[xX][0-9a-fA-F]{1,8}" placeholder="Read from boards" required></label>
+            <label>TX power preset (both boards)<select name="tx_power" required><option value="" disabled selected>Read from boards</option><option value="0xFEFEFEFE">max (0xFEFEFEFE)</option><option value="0x9E9E9E9E">-3 dB (0x9E9E9E9E)</option><option value="0x85858585">-6 dB (0x85858585)</option><option value="0x4A4A4A4A">-9 dB (0x4A4A4A4A)</option><option value="0x3D3D3D3D">-12 dB (0x3D3D3D3D)</option><option value="0x48484848">-15 dB (0x48484848)</option><option value="0x30303030">-18 dB (0x30303030)</option></select></label>
             <button type="submit">Apply to both boards</button>
           </fieldset>
         </form>
