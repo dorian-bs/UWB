@@ -31,6 +31,22 @@ class BatchInput(BaseModel):
     manual_start: bool = False
 
 
+def run_sample_yield(batch: dict[str, Any], run: dict[str, Any]) -> tuple[int, float] | None:
+    """Samples recorded and samples expected at the rate the TX board was configured for."""
+    tx = ((batch.get("radio") or {}).get("boards") or {}).get("tx") or {}
+    period_ms = (tx.get("state") or {}).get("period_ms")
+    duration_s = run.get("duration_s")
+    if not period_ms or not duration_s or "sample_count" not in run:
+        return None
+    return run["sample_count"], duration_s * 1000 / period_ms
+
+
+def sample_yield_pct(batch: dict[str, Any], runs: list[dict[str, Any]]) -> float | None:
+    parts = [part for run in runs if (part := run_sample_yield(batch, run))]
+    expected = sum(part[1] for part in parts)
+    return 100 * sum(part[0] for part in parts) / expected if expected else None
+
+
 class BatchRunner:
     def __init__(
         self,
@@ -186,6 +202,7 @@ class BatchRunner:
             summaries={field: moments.summary() for field, moments in self.moments.items()},
             summary=self.moments["corrected_m"].summary(),
         )
+        run["sample_yield_pct"] = sample_yield_pct(self.meta, [run])
         end = self.health_snapshot()
         run["health_delta"] = {
             key: end[key] - value if end.get(key, value) >= value else None
@@ -350,12 +367,16 @@ class BatchRunner:
                     run["state"] = "incomplete"
                 elif run["state"] == "planned":
                     run["state"] = "not_executed"
+        for run in value["runs"]:
+            if "sample_yield_pct" not in run:
+                run["sample_yield_pct"] = sample_yield_pct(value, [run])
         return value
 
     def list_batches(self) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []
-        return [
-            self.load_batch(path.parent.name)
-            for path in sorted(self.root.glob("*/manifest.json"), reverse=True)
-        ]
+        # Batch directories are random UUIDs, so order by start time (newest first).
+        batches = [self.load_batch(path.parent.name) for path in self.root.glob("*/manifest.json")]
+        return sorted(
+            batches, key=lambda batch: (batch.get("started_at") or "", batch["batch_id"]), reverse=True
+        )

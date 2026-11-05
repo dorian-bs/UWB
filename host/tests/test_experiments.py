@@ -230,3 +230,25 @@ def test_repeated_batch_name_gets_a_number(tmp_path):
         names.append(runner.load_batch(runner.status()["batch_id"])["config"]["name"])
         runner.stop("stopped", None)
     assert names == ["LOS", "LOS 2", "LOS 3", "NLOS"]
+
+
+def test_batches_are_listed_newest_first(tmp_path):
+    root = tmp_path / "experiments"
+    for batch_id, day in [("ffff", "01"), ("0000", "03"), ("8888", "02")]:
+        manifest = {"batch_id": batch_id, "started_at": f"2026-11-{day}T10:00:00+00:00"}
+        (root / batch_id).mkdir(parents=True)
+        (root / batch_id / "manifest.json").write_text(json.dumps(manifest))
+    runner, _, _ = setup_runner(tmp_path)
+    runner.load_batch = lambda batch_id: json.loads((root / batch_id / "manifest.json").read_text())
+    assert [b["batch_id"] for b in runner.list_batches()] == ["0000", "8888", "ffff"]
+
+
+def test_sample_yield_compares_recorded_samples_with_the_configured_rate():
+    from uwb_lab.experiments import sample_yield_pct
+
+    batch = {"radio": {"boards": {"tx": {"state": {"period_ms": 100}}}}}
+    runs = [{"sample_count": 50, "duration_s": 10}, {"sample_count": 100, "duration_s": 10}]
+    runs.append({"sample_count": 3})
+    assert sample_yield_pct(batch, runs[:1]) == pytest.approx(50)
+    assert sample_yield_pct(batch, runs) == pytest.approx(75)
+    assert sample_yield_pct({}, runs) is None

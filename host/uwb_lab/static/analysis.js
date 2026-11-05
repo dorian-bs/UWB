@@ -189,6 +189,39 @@ function startAnalysisPanel({request, showError}) {
     if (className) element.className = className;
     return element;
   };
+  function renderExperimentConfig(batch) {
+    const config = batch.config || {}, prior = batch.prior || {};
+    const text = (value, unit = "") => value === null || value === undefined || value === "" ? null : `${value}${unit}`;
+    const hex = (value) => Number.isFinite(value) ? `0x${value.toString(16).padStart(8, "0").toUpperCase()}` : null;
+    const radio = (state) => state ? [
+      ["Channel", state.channel], ["Preamble", text(state.preamble)],
+      ["Data rate", state.data_rate === 6800 ? "6.8 Mbps" : text(state.data_rate, " kbps")],
+      ["Rate", text(state.period_ms ? 1000 / state.period_ms : null, " Hz")],
+      ["TX power", hex(state.tx_power)], ["Antenna delay", text(state.tx_ant_dly)],
+    ] : [];
+    const boards = batch.radio?.boards || {}, tx = boards.tx?.state, rx = boards.rx?.state;
+    const txRows = radio(tx), rxRows = radio(rx);
+    const radioItems = txRows.map(([name, value], index) => {
+      const other = rxRows[index]?.[1];
+      return !rx || value === other ? [name, value] : [name, `TX ${value} / RX ${other}`];
+    });
+    const rows = [
+      ["Experiment", [["Name", config.name], ["Runs", text(config.run_count, ` x ${config.duration_s} s`)], ["Source", batch.source]]],
+      ["Prior", [["Distance", text(prior.expected_distance_m, " m")], ["Uncertainty", text(prior.uncertainty_m, " m")]]],
+      ["Radio", radioItems.length ? radioItems : [["Settings", "not recorded"]]],
+    ];
+    const element = node("table", null, "analysis-table config-table"), body = node("tbody");
+    for (const [title, items] of rows) {
+      const row = node("tr");
+      row.append(node("th", title));
+      const cell = node("td");
+      cell.textContent = items.filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([name, value]) => `${name} ${value}`).join("  ·  ") || "--";
+      row.append(cell); body.append(row);
+    }
+    element.append(body);
+    byId("experiment-config-body").replaceChildren(element);
+  }
   function table(columns, rows) {
     const wrapper = node("div", null, "table-scroll");
     const element = node("table", null, "analysis-table"), head = node("thead"), heading = node("tr");
@@ -204,6 +237,29 @@ function startAnalysisPanel({request, showError}) {
     element.append(body); wrapper.append(element);
     return wrapper;
   }
+  const excluded = new Set();
+  let excludeKey = null;
+  function renderExcludeList(batch) {
+    const runs = batch.runs.filter((run) => run.session);
+    const key = `${batch.batch_id}:${runs.map((run) => run.run_id).join(",")}`;
+    if (excludeKey !== key) {
+      if (!excludeKey || excludeKey.split(":")[0] !== batch.batch_id) excluded.clear();
+      excludeKey = key;
+      byId("analysis-exclude-list").replaceChildren(...runs.map((run) => {
+        const box = node("input"), label = node("label");
+        box.type = "checkbox"; box.value = run.run_id; box.checked = excluded.has(run.run_id);
+        label.append(box, document.createTextNode(`#${batch.runs.indexOf(run) + 1}`));
+        return label;
+      }));
+    }
+    byId("analysis-exclude-summary").textContent = excluded.size ? `Exclude runs (${excluded.size} excluded)` : "Exclude runs";
+  }
+  byId("analysis-exclude-list").addEventListener("change", (event) => {
+    const box = event.target;
+    if (box.checked) excluded.add(box.value); else excluded.delete(box.value);
+    byId("analysis-exclude-summary").textContent = excluded.size ? `Exclude runs (${excluded.size} excluded)` : "Exclude runs";
+    mode = "cumulative"; invalidate(); tick();
+  });
   function invalidate() {
     generation++; selection = null; dirty = true; lastComputed = 0;
     byId("analysis-state").textContent = hasResults
@@ -371,12 +427,14 @@ function startAnalysisPanel({request, showError}) {
       scope.replaceChildren(new Option("All runs (all samples)", "batch"), new Option("Latest / current run", "current"));
       batch.runs.filter((run) => run.session).forEach((run) => scope.append(new Option(`${run.run_id} - ${run.state}`, run.run_id)));
       scope.value = [...scope.options].some((option) => option.value === priorScope) ? priorScope : "batch";
+      renderExperimentConfig(batch);
+      renderExcludeList(batch);
       byId("run-comparison").replaceChildren(table(
-        ["Run", "State", "Eligible n", "Excluded n", "Bias (m)", "Sample std. (m)", "RMSE (m)"],
+        ["Run", "State", "Eligible n", "Excluded n", "Yield (%)", "Bias (m)", "Sample std. (m)", "RMSE (m)"],
         batch.runs.map((run) => {
           const summary = run.summaries?.[preferences.field] || {};
           return [run.run_id, run.state, summary.count ?? 0, run.excluded_count ?? 0,
-            summary.bias_m, summary.std_m, summary.rmse_m];
+            run.sample_yield_pct, summary.bias_m, summary.std_m, summary.rmse_m];
         })
       ));
       const selectedRuns = batch.runs.filter((run) => run.session &&
@@ -404,7 +462,11 @@ function startAnalysisPanel({request, showError}) {
       }
       if (!dirty && (mode === "full" || batch.outcome !== "running" || Date.now() - lastComputed < 2000)) return;
       const scopeValue = scope.value;
-      const recipe = {...preferences, batch_id: batchId, mode,
+      const runNumber = (id) => Number.parseInt(byId(id).value, 10) || null;
+      const runFrom = runNumber("analysis-run-from"), runTo = runNumber("analysis-run-to");
+      if (runFrom && runTo && runFrom > runTo) throw new Error("From run # must not exceed To run #");
+      const recipe = {...preferences, batch_id: batchId, mode, run_from: runFrom, run_to: runTo,
+        exclude_runs: [...excluded],
         scope: ["current", "batch"].includes(scopeValue) ? scopeValue : "run",
         run_id: ["current", "batch"].includes(scopeValue) ? null : scopeValue};
       const job = await request("/api/analysis/jobs", {method: "POST", body: JSON.stringify(recipe)});
@@ -423,7 +485,7 @@ function startAnalysisPanel({request, showError}) {
     }
   }
   byId("analysis-settings").addEventListener("change", changed);
-  for (const id of ["analysis-dataset", "analysis-scope"]) {
+  for (const id of ["analysis-dataset", "analysis-scope", "analysis-run-from", "analysis-run-to"]) {
     byId(id).addEventListener("change", () => { mode = "cumulative"; invalidate(); tick(); });
   }
   byId("analysis-full").addEventListener("click", () => { mode = "full"; invalidate(); tick(); });

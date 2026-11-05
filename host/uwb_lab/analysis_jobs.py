@@ -17,16 +17,17 @@ from .analysis import (
     METHODS,
     AnalysisRequest,
     AnalysisSample,
+    Metric,
     describe,
     distribution_fit,
     pooled_power_spectrum,
 )
 from .core import utc_now, write_json_atomic
-from .experiments import BatchRunner
+from .experiments import BatchRunner, sample_yield_pct
 from .radio import _settle
 
 logger = logging.getLogger(__name__)
-ANALYSIS_VERSION = "noise-4"
+ANALYSIS_VERSION = "noise-5"
 
 
 class AnalysisService:
@@ -43,7 +44,14 @@ class AnalysisService:
         if self.closing:
             raise ValueError("Analysis service is shutting down")
         batch = self.runner.load_batch(request.batch_id)
+        # run_from/run_to are 1-based run numbers (run-0007 is number 7), inclusive.
         all_runs = [run for run in batch["runs"] if run.get("session")]
+        if request.exclude_runs:
+            all_runs = [run for run in all_runs if run["run_id"] not in set(request.exclude_runs)]
+        if request.run_from or request.run_to:
+            first, last = request.run_from or 1, request.run_to or len(batch["runs"])
+            numbered = {run["run_id"]: index + 1 for index, run in enumerate(batch["runs"])}
+            all_runs = [run for run in all_runs if first <= numbered[run["run_id"]] <= last]
         runs = all_runs
         if request.scope == "run":
             runs = [run for run in runs if run["run_id"] == request.run_id]
@@ -223,6 +231,11 @@ class AnalysisService:
         for method in dict.fromkeys(request.methods):
             if method == "statistics":
                 result = describe(values)
+                yield_pct = sample_yield_pct(snapshot["batch"], snapshot["runs"])
+                if yield_pct is not None and result.metrics:
+                    result.metrics.append(
+                        Metric(key="sample_yield_pct", label="Sample yield", value=yield_pct, unit="%")
+                    )
             elif method == "distribution":
                 result = distribution_fit(
                     values, request.histogram_bins, request.fit, request.components, request.seed

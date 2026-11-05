@@ -228,7 +228,9 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 /* ---------- 8. Noise analysis ---------- */
 .analysis-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 12px; margin-bottom: 10px; }
 .analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
-.analysis-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.analysis-selection { display: grid; grid-template-columns: 2fr 2fr 1fr 1fr; gap: 8px; }
+.exclude-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11px; }
+.exclude-list label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .analysis-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
 .analysis-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; }
 .analysis-context > .plot-note, .analysis-context > details { margin: 0; }

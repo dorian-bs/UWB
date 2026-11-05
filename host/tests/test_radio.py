@@ -690,3 +690,42 @@ def test_dual_usb_http_apply_records_revisioned_samples(monkeypatch, tmp_path):
     finally:
         tx.close()
         rx.close()
+
+
+def test_exchange_quality_counts_missed_attempts_and_counter_restarts():
+    quality = radio_module().ExchangeQuality()
+    assert quality.success_pct(now=0) is None
+    for stamp, seq in [(0, 10), (1, 12), (2, 14), (3, 16), (4, 17)]:
+        quality.add(seq, stamp)
+    assert quality.success_pct(now=4) == pytest.approx(100 * 5 / 8)
+    assert quality.success_pct(now=100) is None
+    quality.add(1, 5)
+    quality.add(2, 6)
+    assert quality.success_pct(now=6) == 100
+
+
+def test_sample_quality_compares_observed_with_requested_rate():
+    from uwb_lab.app import Runtime
+
+    runtime = Runtime()
+    for index in range(6):
+        runtime.sample_rate.add(index * 0.2)
+    runtime.sample_rate.value = lambda now=None: 5.0
+    quality = runtime.sample_quality({"boards": {"tx": {"state": {"period_ms": 100}}}})
+    assert quality["requested_hz"] == 10
+    assert quality["yield_pct"] == 50
+    assert runtime.sample_quality({"supported": False})["yield_pct"] is None
+
+
+def test_sample_quality_restarts_when_the_requested_rate_changes():
+    from uwb_lab.app import Runtime
+
+    runtime = Runtime()
+    radio = {"boards": {"tx": {"state": {"period_ms": 1000}}}}
+    runtime.sample_quality(radio)
+    runtime.sample_rate.add(0)
+    runtime.exchange_quality.add(1, 0)
+    runtime.sample_quality(radio)
+    assert runtime.sample_rate.times
+    runtime.sample_quality({"boards": {"tx": {"state": {"period_ms": 100}}}})
+    assert not runtime.sample_rate.times and not runtime.exchange_quality.recent

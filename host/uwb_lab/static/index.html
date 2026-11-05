@@ -68,6 +68,10 @@
           <dd class="metric-value"><strong id="fp-gap-value">--</strong><span class="metric-unit">dB</span></dd>
           <dt title="RX power minus first-path power. Higher means a weaker direct path (multipath / NLOS).">RX - first-path gap</dt>
         </div>
+        <div class="metric-tile">
+          <dd class="metric-value"><strong id="yield-value">--</strong><span class="metric-unit">%</span></dd>
+          <dt title="Observed valid samples per second as a share of the requested ranging rate (needs the radio panel: dual-serial mode). Exchange success is the share of recent attempts that gave a sample.">Sample yield</dt>
+        </div>
       </dl>
 
       <section class="display-controls" aria-label="Shared display settings">
@@ -186,6 +190,8 @@
         <div class="analysis-selection">
           <label>Dataset<select id="analysis-dataset"><option value="">Current batch</option></select></label>
           <label>Scope<select id="analysis-scope"><option value="batch">All runs (all samples)</option><option value="current">Latest / current run</option></select></label>
+          <label>From run #<input id="analysis-run-from" type="number" min="1" step="1" placeholder="first"></label>
+          <label>To run #<input id="analysis-run-to" type="number" min="1" step="1" placeholder="last"></label>
         </div>
         <div class="analysis-context">
           <p id="analysis-source" class="plot-note">Select a dataset.</p>
@@ -194,8 +200,16 @@
             <p id="analysis-provenance" class="plot-note"></p>
           </details>
         </div>
+        <details id="analysis-exclude" class="axis-settings">
+          <summary id="analysis-exclude-summary">Exclude runs</summary>
+          <div id="analysis-exclude-list" class="exclude-list"></div>
+        </details>
         <div id="analysis-cards" class="analysis-grid"></div>
         <h2 class="comparison-title">Run comparison</h2>
+        <details id="experiment-config" class="axis-settings">
+          <summary>Experiment configuration</summary>
+          <div id="experiment-config-body"></div>
+        </details>
         <div id="run-comparison" class="table-scroll"></div>
       </section>
       </div>

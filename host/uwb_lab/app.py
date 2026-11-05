@@ -21,7 +21,7 @@ from .analysis_jobs import AnalysisService
 from .calibration import CalibrationApplyInput, CalibrationCapture, CalibrationInput
 from .core import RX_LEVEL_OFFSET_DB, LabState, SessionRecorder
 from .experiments import BatchInput, BatchRunner
-from .radio import ControlError, RadioConfig, RadioControl, SampleRate, SerialBoard
+from .radio import ControlError, ExchangeQuality, RadioConfig, RadioControl, SampleRate, SerialBoard
 
 PACKAGE_DIR = Path(__file__).parent
 DATA_DIR = Path(os.getenv("UWB_DATA_DIR", PACKAGE_DIR.parent.parent / "data" / "sessions"))
@@ -56,6 +56,8 @@ class Runtime:
         self.last_error: str | None = None
         self.task: asyncio.Task[None] | None = None
         self.sample_rate = SampleRate()
+        self.exchange_quality = ExchangeQuality()
+        self.quality_period_ms: int | None = None
         self.radio: RadioControl | None = None
         if self.source == "dual-serial":
             tx_port = os.getenv("UWB_SERIAL_PORT", "")
@@ -104,6 +106,7 @@ class Runtime:
             return
         if sample["valid"]:
             self.sample_rate.add(received_at)
+            self.exchange_quality.add(sample["seq"], received_at)
         if self.radio is not None:
             self.calibration.observe(sample, self.radio, received_at)
         try:
@@ -133,9 +136,29 @@ class Runtime:
             except (TimeoutError, WebSocketDisconnect, RuntimeError, OSError) as error:
                 logger.warning("Dashboard client could not be closed: %s", error)
 
+    def sample_quality(self, radio: dict[str, Any]) -> dict[str, float | None]:
+        """Observed rate against the rate the TX board is configured for, and per-attempt success."""
+        tx = (radio.get("boards") or {}).get("tx") or {}
+        period_ms = (tx.get("state") or {}).get("period_ms")
+        if period_ms and period_ms != self.quality_period_ms:
+            # Samples from the previous rate and the pause while applying it would skew the window.
+            if self.quality_period_ms is not None:
+                self.sample_rate.times.clear()
+                self.exchange_quality.recent.clear()
+            self.quality_period_ms = period_ms
+        observed = self.sample_rate.value()
+        requested = 1000 / period_ms if period_ms else None
+        yield_pct = 100 * observed / requested if requested and observed is not None else None
+        return {
+            "requested_hz": requested,
+            "yield_pct": yield_pct,
+            "exchange_success_pct": self.exchange_quality.success_pct(),
+        }
+
     def status(self) -> dict[str, Any]:
         if self.radio:
             self.calibration.check_boards(self.radio)
+        radio = self.radio.status() if self.radio else {"supported": False}
         return {
             "source": self.source,
             "connected": self.connected,
@@ -148,7 +171,8 @@ class Runtime:
             "session": self.recorder.session_dir.name if self.recorder.session_dir else None,
             "prior": self.state.prior.to_dict() if self.state.prior else None,
             "observed_hz": self.sample_rate.value(),
-            "radio": self.radio.status() if self.radio else {"supported": False},
+            **self.sample_quality(radio),
+            "radio": radio,
             "experiment": self.experiments.status(),
             "calibration": self.calibration.status(),
         }

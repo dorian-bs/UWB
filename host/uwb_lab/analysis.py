@@ -40,6 +40,9 @@ class AnalysisRequest(BaseModel):
     batch_id: str
     scope: Literal["current", "run", "batch"] = "batch"
     run_id: str | None = None
+    run_from: int | None = Field(default=None, ge=1, strict=True)
+    run_to: int | None = Field(default=None, ge=1, strict=True)
+    exclude_runs: list[str] = Field(default_factory=list, max_length=10_000)
     mode: Literal["cumulative", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
     methods: list[Literal["statistics", "distribution", "psd"]] = Field(default_factory=lambda: list(METHODS))
@@ -52,6 +55,8 @@ class AnalysisRequest(BaseModel):
     def check_scope(self) -> AnalysisRequest:
         if (self.scope == "run") != (self.run_id is not None):
             raise ValueError("run_id is required exactly when scope is run")
+        if self.run_from and self.run_to and self.run_from > self.run_to:
+            raise ValueError("run_from must not exceed run_to")
         return self
 
 

@@ -255,6 +255,45 @@ def test_spectrum_pools_all_runs_even_when_scope_selects_one(tmp_path):
     asyncio.run(scenario())
 
 
+def test_run_range_limits_batch_analysis(tmp_path):
+    from uwb_lab.analysis import AnalysisRequest
+    from uwb_lab.analysis_jobs import AnalysisService
+
+    async def scenario():
+        runner = archive(tmp_path)
+        batch_id = runner.status()["batch_id"]
+        runs = [run for run in runner.load_batch(batch_id)["runs"] if run.get("session")]
+        assert len(runs) >= 2
+        service = AnalysisService(runner)
+        job = service.submit(AnalysisRequest(batch_id=batch_id, methods=["statistics"], run_from=2, run_to=2))
+        await service.close()
+        output = service.get(job["job_id"])["output"]
+        assert [run["run_id"] for run in output["provenance"]["runs"]] == [runs[1]["run_id"]]
+        with pytest.raises(ValueError):
+            AnalysisRequest(batch_id=batch_id, run_from=3, run_to=2)
+
+    asyncio.run(scenario())
+
+
+def test_excluded_runs_are_left_out_of_batch_analysis(tmp_path):
+    from uwb_lab.analysis import AnalysisRequest
+    from uwb_lab.analysis_jobs import AnalysisService
+
+    async def scenario():
+        runner = archive(tmp_path)
+        batch_id = runner.status()["batch_id"]
+        runs = [run["run_id"] for run in runner.load_batch(batch_id)["runs"] if run.get("session")]
+        service = AnalysisService(runner)
+        job = service.submit(
+            AnalysisRequest(batch_id=batch_id, methods=["statistics"], exclude_runs=[runs[0]])
+        )
+        await service.close()
+        output = service.get(job["job_id"])["output"]
+        assert [run["run_id"] for run in output["provenance"]["runs"]] == runs[1:]
+
+    asyncio.run(scenario())
+
+
 def test_cumulative_live_snapshot_includes_older_samples_but_not_later_appends(tmp_path):
     from uwb_lab.analysis import AnalysisRequest
     from uwb_lab.analysis_jobs import AnalysisService

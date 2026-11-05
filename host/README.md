@@ -87,8 +87,15 @@ The **Radio / sampling** panel offers:
 These are physical radio settings. Demo, replay, TCP, and single-USB modes cannot
 apply them. The 10 Hz guard is not a verified throughput claim; requested rate and
 observed successful-sample rate are shown separately.
+The **Sample yield** tile is the observed rate as a percentage of the rate the TX board is configured for;
+the radio panel also shows the share of recent ranging attempts (from the firmware exchange counter) that produced a sample.
 See the [parameter reference](../docs/EXPERIMENTS_AND_VALIDATION.md#radio-and-sampling-parameter-reference)
 for physical meaning and comparison advice.
+
+The noise analysis **From run # / To run #** fields (blank = no limit) restrict the analysis to a range of runs, e.g. to drop bad runs at the start or end.
+The **Exclude runs** drop-down has a checkbox per run to leave individual runs out of the analysis.
+In the noise analysis, the collapsible **Experiment configuration** section lists the selected dataset's
+settings as recorded in its manifest: batch settings, prior, and the TX/RX radio configuration.
 
 **Apply to both boards** pauses both, applies and reads back both configurations,
 then resumes RX before TX. Failures trigger rollback; an unconfirmed pair is not

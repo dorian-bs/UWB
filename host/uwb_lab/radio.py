@@ -507,3 +507,22 @@ class SampleRate:
             return None
         rate = (len(recent) - 1) / span
         return 0.0 if now - recent[-1] > max(3, 3 / rate) else rate
+
+
+class ExchangeQuality:
+    """Share of recent ranging attempts that produced a sample, from the firmware exchange counter."""
+
+    def __init__(self) -> None:
+        self.recent: deque[tuple[float, int]] = deque(maxlen=100)
+
+    def add(self, sequence: int, timestamp: float | None = None) -> None:
+        if self.recent and sequence <= self.recent[-1][1]:
+            self.recent.clear()  # the TX board restarted its counter
+        self.recent.append((time.monotonic() if timestamp is None else timestamp, sequence))
+
+    def success_pct(self, now: float | None = None) -> float | None:
+        now = time.monotonic() if now is None else now
+        recent = [item for item in self.recent if now - item[0] <= 30]
+        if len(recent) < 2:
+            return None
+        return 100 * len(recent) / (recent[-1][1] - recent[0][1] + 1)

@@ -661,7 +661,10 @@ function startDashboard() {
     const available = radioAvailable(radio);
     byId("radio-fields").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
     byId("radio-refresh").disabled = !available || radioSubmitting || status.experiment?.active || status.calibration?.active;
-    byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} samples/s`;
+    byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} samples/s` +
+      (Number.isFinite(status.requested_hz) ? ` of ${formatAnalysisValue(status.requested_hz, "Hz")} requested` : "") +
+      (Number.isFinite(status.exchange_success_pct) ? `; ${status.exchange_success_pct.toFixed(0)}% of exchange attempts succeed` : "");
+    byId("yield-value").textContent = Number.isFinite(status.yield_pct) ? status.yield_pct.toFixed(0) : "--";
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
