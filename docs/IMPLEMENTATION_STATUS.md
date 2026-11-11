@@ -74,8 +74,8 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
 2. Calibrate antenna delays and compare bias/spread across a few distances.
 3. Add simple timestamped LOS/NLOS labels and evaluate which additional diagnostics
    beyond the v2 compact set are worth storing.
-4. Compare independent recordings using the existing analysis. Add a simple baseline
-   before considering HMMs, GPs, neural models, or downstream localization.
+4. Use the two-batch comparison view (residual deltas + transparent distribution overlays)
+   to establish a simple baseline before considering HMMs, GPs, neural models, or downstream localization.
 
 No database, plugin system, export stack, or extra service is required for these steps.
 

@@ -189,6 +189,7 @@
       <section class="analysis-panel" aria-label="Noise analysis workspace">
         <div class="analysis-selection">
           <label>Dataset<select id="analysis-dataset"><option value="">Current batch</option></select></label>
+          <label>Compare with<select id="analysis-compare-dataset"><option value="">No comparison</option></select></label>
           <label>Scope<select id="analysis-scope"><option value="batch">All runs (all samples)</option><option value="current">Latest / current run</option></select></label>
           <label>From run #<input id="analysis-run-from" type="number" min="1" step="1" placeholder="first"></label>
           <label>To run #<input id="analysis-run-to" type="number" min="1" step="1" placeholder="last"></label>
@@ -361,6 +362,7 @@
           <div id="analysis-methods" class="form-fields"></div>
           <label>Distribution model
             <select name="fit">
+              <option value="auto">Auto (best AIC per dataset)</option>
               <option value="gaussian">Gaussian</option>
               <option value="gmm">Gaussian mixture (GMM)</option>
               <option value="lognormal">Log-normal (shifted)</option>
@@ -369,6 +371,7 @@
               <option value="skew_normal">Skew-normal</option>
             </select>
           </label>
+          <label class="check"><input name="compare_show_fits" type="checkbox">Show fitted curves in batch comparison</label>
           <details><summary>Method parameters</summary>
             <div class="form-fields">
               <label>Histogram bins<input name="histogram_bins" type="number" min="1" max="200" value="30" required></label>

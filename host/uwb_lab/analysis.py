@@ -46,10 +46,11 @@ class AnalysisRequest(BaseModel):
     mode: Literal["cumulative", "full"] = "cumulative"
     field: Literal["raw_m", "corrected_m"] = "corrected_m"
     methods: list[Literal["statistics", "distribution", "psd"]] = Field(default_factory=lambda: list(METHODS))
-    fit: Literal["gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"] = "gaussian"
+    fit: Literal["auto", "gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"] = "gaussian"
     histogram_bins: int = Field(default=30, ge=1, le=200, strict=True)
     components: int = Field(default=2, ge=1, le=6, strict=True)
     seed: int = Field(default=0, ge=0, le=2**32 - 1, strict=True)
+    compare_show_fits: bool = False
 
     @model_validator(mode="after")
     def check_scope(self) -> AnalysisRequest:
@@ -319,29 +320,38 @@ def distribution_fit(
                 skipped.append(f"{FITS[name]}: fit failed")
             else:
                 candidates[name] = outcome
-    if fit not in candidates:
+    count = len(values)
+    scored = {}
+    for name, candidate in candidates.items():
+        aic = 2 * candidate.k - 2 * candidate.log_likelihood
+        bic = candidate.k * math.log(count) - 2 * candidate.log_likelihood
+        ks = float(stats.kstest(values, candidate.cdf).statistic)
+        scored[name] = (candidate, aic, bic, ks)
+
+    notes = []
+    if fit == "auto":
+        if not scored:
+            return AnalysisResult(status="failed", reason="No distribution fit converged")
+        fit = min(scored, key=lambda name: scored[name][1])
+        notes.append(f"Auto fit selected {FITS[fit]} (lowest AIC).")
+    if fit not in scored:
         reason = next((note for note in skipped if note.startswith(FITS[fit])), f"{FITS[fit]}: fit failed")
         return AnalysisResult(status="failed", reason=reason)
 
-    count = len(values)
     mean, std = float(np.mean(values)), float(np.std(values))
     grid = np.linspace(min(edges[0], mean - 4 * std), max(edges[-1], mean + 4 * std), 300)
-    chosen = candidates[fit]
+    chosen, aic, bic, ks = scored[fit]
     series = [bars, Series(label=chosen.label, x=grid.tolist(), y=chosen.pdf(grid).tolist())]
     if chosen.components:
         for index, (weight, mu, sigma) in enumerate(chosen.components, start=1):
             curve = weight * stats.norm.pdf(grid, mu, sigma)
             series.append(Series(label=f"Component {index}", x=grid.tolist(), y=curve.tolist()))
 
-    def criteria(candidate: Candidate) -> tuple[float, float, float]:
-        aic = 2 * candidate.k - 2 * candidate.log_likelihood
-        bic = candidate.k * math.log(count) - 2 * candidate.log_likelihood
-        ks = float(stats.kstest(values, candidate.cdf).statistic)
-        return aic, bic, ks
-
-    aic, bic, ks = criteria(chosen)
     comparison = sorted(
-        ([candidate.label, *criteria(candidate)] for candidate in candidates.values()),
+        (
+            [candidate.label, aic_value, bic_value, ks_value]
+            for candidate, aic_value, bic_value, ks_value in scored.values()
+        ),
         key=lambda row: row[1],
     )
     parameter_table = (
@@ -354,7 +364,7 @@ def distribution_fit(
         )
     )
     return AnalysisResult(
-        warnings=chosen.notes + skipped,
+        warnings=notes + chosen.notes + skipped,
         metrics=[
             Metric(key="log_likelihood", label="Mean log likelihood", value=chosen.log_likelihood / count),
             Metric(key="aic", label="AIC", value=aic),

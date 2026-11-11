@@ -1,7 +1,7 @@
-const ANALYSIS_FITS = ["gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"];
+const ANALYSIS_FITS = ["auto", "gaussian", "gmm", "lognormal", "student_t", "laplace", "skew_normal"];
 const ANALYSIS_DEFAULTS = {
   field: "corrected_m", methods: ["statistics", "distribution", "psd"],
-  fit: "gaussian", histogram_bins: 30, components: 2, seed: 0,
+  fit: "gaussian", histogram_bins: 30, components: 2, seed: 0, compare_show_fits: false,
 };
 
 function validateAnalysisPreferences(value, methodIds = ANALYSIS_DEFAULTS.methods) {
@@ -24,6 +24,7 @@ function validateAnalysisPreferences(value, methodIds = ANALYSIS_DEFAULTS.method
       throw new Error(`Invalid ${name.replaceAll("_", " ")}`);
     }
   }
+  if (typeof result.compare_show_fits !== "boolean") throw new Error("Invalid comparison fit visibility");
   result.methods = [...new Set(result.methods.filter((method) => method !== "acf"))];
   return result;
 }
@@ -93,6 +94,111 @@ function analysisLegendLabels(series) {
     curve.label === "Empirical density" ? "Samples" : curve.label.replace(/^Component (\d+)$/, "C$1"));
 }
 
+function comparisonLegendLabels(_series) {
+  return [];
+}
+
+function comparisonMetricRows(primaryMetrics, secondaryMetrics) {
+  const index = (metrics) => new Map(metrics.map((metric) => [metric.key, metric]));
+  const left = index(primaryMetrics), right = index(secondaryMetrics);
+  const orderedKeys = [...new Set([...primaryMetrics, ...secondaryMetrics].map((metric) => metric.key))];
+  return orderedKeys.map((key) => {
+    const first = left.get(key), second = right.get(key);
+    const unit = first?.unit || second?.unit || "";
+    const label = first?.label || second?.label || key;
+    const delta = typeof first?.value === "number" && typeof second?.value === "number"
+      ? second.value - first.value : null;
+    return [
+      label,
+      formatAnalysisValue(first?.value ?? null, unit),
+      formatAnalysisValue(second?.value ?? null, unit),
+      formatAnalysisValue(delta, unit, true),
+    ];
+  });
+}
+
+function comparisonDeltaClass(delta) {
+  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0) return "same";
+  return delta > 0 ? "up" : "down";
+}
+
+function comparisonMetricTiles(primaryMetrics, secondaryMetrics) {
+  return comparisonMetricRows(primaryMetrics, secondaryMetrics).map(([label, left, right, delta]) => {
+    const leftNumber = Number(left), rightNumber = Number(right);
+    const trend = comparisonDeltaClass(
+      Number.isFinite(leftNumber) && Number.isFinite(rightNumber) ? rightNumber - leftNumber : null
+    );
+    const key = [...primaryMetrics, ...secondaryMetrics].find((metric) => metric.label === label)?.key || label;
+    return {key, label, left, right, delta, trend};
+  });
+}
+
+function colorWithAlpha(color, alpha) {
+  if (!Number.isFinite(alpha) || alpha >= 1) return color;
+  const clamped = Math.max(0, Math.min(1, alpha));
+  const short = /^#([\da-f]{3})$/i.exec(color);
+  if (short) {
+    const [r, g, b] = short[1].split("").map((digit) => Number.parseInt(digit + digit, 16));
+    return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+  }
+  const full = /^#([\da-f]{6})$/i.exec(color);
+  if (full) {
+    const r = Number.parseInt(full[1].slice(0, 2), 16);
+    const g = Number.parseInt(full[1].slice(2, 4), 16);
+    const b = Number.parseInt(full[1].slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+  }
+  return color;
+}
+
+function alignHistogramSeries(left, right) {
+  if (left.x.length !== right.x.length) return [left, right];
+  const rightShift = left.x[0] - right.x[0];
+  return [left, shiftSeriesX(right, rightShift)];
+}
+
+function shiftSeriesX(series, delta) {
+  if (!delta) return series;
+  return {...series, x: series.x.map((value) => value + delta)};
+}
+
+function overlaySeries(left, right, leftLabel, rightLabel, includeFits = false) {
+  const leftPalette = ["#176b87", "#087f5b", "#966000", "#7851a9"];
+  const rightPalette = ["#b63036", "#6d3ca4", "#b35c10", "#536878"];
+  const leftBars = left.find((curve) => curve.label === "Empirical density");
+  const rightBars = right.find((curve) => curve.label === "Empirical density");
+  if (!leftBars || !rightBars) return [];
+  const [alignedLeftBars, alignedRightBars] = alignHistogramSeries(leftBars, rightBars);
+  const leftDelta = alignedLeftBars.x[0] - leftBars.x[0];
+  const rightDelta = alignedRightBars.x[0] - rightBars.x[0];
+  const withStyle = (series, palette, suffix) => [series]
+    .map((curve, index) => ({
+    ...curve,
+    style: "bars",
+    label: `${curve.label} (${suffix})`,
+    color: palette[index % palette.length],
+    alpha: 0.62,
+  }));
+  const combined = [
+    ...withStyle(alignedLeftBars, leftPalette, leftLabel),
+    ...withStyle(alignedRightBars, rightPalette, rightLabel),
+  ];
+  if (!includeFits) return combined;
+  const fitted = (series, palette, suffix, delta) => series
+    .filter((curve) => curve.label !== "Empirical density")
+    .map((curve, index) => ({
+      ...shiftSeriesX(curve, delta),
+      label: `${curve.label} (${suffix})`,
+      color: palette[(index + 1) % palette.length],
+      alpha: 1,
+    }));
+  return [
+    ...combined,
+    ...fitted(left, leftPalette, leftLabel, leftDelta),
+    ...fitted(right, rightPalette, rightLabel, rightDelta),
+  ];
+}
+
 function resultMatches(selection, job) {
   return selection.jobId === job.job_id && selection.recipeKey === job.recipe_key;
 }
@@ -155,7 +261,8 @@ function drawAnalysisChart(canvas, plot) {
   }
   const colors = theme.curves;
   plot.series.forEach((curve, index) => {
-    context.strokeStyle = context.fillStyle = colors[index % colors.length];
+    const color = curve.color || colors[index % colors.length];
+    context.strokeStyle = context.fillStyle = colorWithAlpha(color, curve.alpha ?? 1);
     context.lineWidth = 1.6; context.beginPath();
     const barWidth = curve.x.length > 1 ? Math.max(1, Math.abs(x(curve.x[1]) - x(curve.x[0])) * 0.85) : 10;
     curve.x.forEach((value, point) => {
@@ -236,6 +343,126 @@ function startAnalysisPanel({request, showError}) {
     });
     element.append(body); wrapper.append(element);
     return wrapper;
+  }
+  function batchLabel(batch) {
+    const name = batch.config?.name || "Batch";
+    const started = batch.started_at ? batch.started_at.slice(0, 19) : batch.batch_id;
+    return `${name} (${started})`;
+  }
+  function runRows(batch) {
+    return batch.runs.map((run) => {
+      const summary = run.summaries?.[preferences.field] || {};
+      return [run.run_id, run.state, summary.count ?? 0, run.excluded_count ?? 0,
+        run.sample_yield_pct, summary.bias_m, summary.std_m, summary.rmse_m];
+    });
+  }
+  function renderRunComparison(primaryBatch, secondaryBatch = null) {
+    const holder = byId("run-comparison");
+    if (!secondaryBatch) {
+      holder.replaceChildren(table(
+        ["Run", "State", "Eligible n", "Excluded n", "Yield (%)", "Bias (m)", "Sample std. (m)", "RMSE (m)"],
+        runRows(primaryBatch)
+      ));
+      return;
+    }
+    const leftTitle = node("h3", `Runs: ${batchLabel(primaryBatch)}`, "plot-note");
+    const rightTitle = node("h3", `Runs: ${batchLabel(secondaryBatch)}`, "plot-note");
+    holder.replaceChildren(
+      leftTitle,
+      table(["Run", "State", "Eligible n", "Excluded n", "Yield (%)", "Bias (m)", "Sample std. (m)", "RMSE (m)"], runRows(primaryBatch)),
+      rightTitle,
+      table(["Run", "State", "Eligible n", "Excluded n", "Yield (%)", "Bias (m)", "Sample std. (m)", "RMSE (m)"], runRows(secondaryBatch))
+    );
+  }
+  function renderComparison(primaryBatch, primaryOutput, secondaryBatch, secondaryOutput) {
+    const primaryLabel = batchLabel(primaryBatch), secondaryLabel = batchLabel(secondaryBatch);
+    const left = analysisSourceSummary(primaryOutput, preferences.field);
+    const right = analysisSourceSummary(secondaryOutput, preferences.field);
+    byId("analysis-source").textContent =
+      `${primaryLabel}: ${primaryOutput.included_count} samples vs ${secondaryLabel}: ${secondaryOutput.included_count} samples`;
+    byId("analysis-provenance").textContent = `${left.details}\n\n${right.details}`;
+    byId("analysis-details").hidden = false;
+    const cardsNode = byId("analysis-cards");
+    const nextPlots = [];
+    const cardsList = [];
+    const residualLeft = primaryOutput.results.find((item) => item.method === "statistics")?.result;
+    const residualRight = secondaryOutput.results.find((item) => item.method === "statistics")?.result;
+    if (residualLeft?.status === "ok" && residualRight?.status === "ok") {
+      const card = node("article", null, "analysis-card");
+      const header = node("header", null, "analysis-card-header");
+      const title = node("div", null, "analysis-card-title");
+      title.append(node("h3", "Residual comparison"));
+      header.append(title); card.append(header);
+      const metrics = analysisCardSummary("statistics", residualLeft.metrics).metrics;
+      const secondaryMetrics = analysisCardSummary("statistics", residualRight.metrics).metrics;
+      const tiles = node("dl", null, "analysis-metrics");
+      comparisonMetricTiles(metrics, secondaryMetrics).forEach(({key, label, left, right, delta, trend}) => {
+        const tile = node("div", null, `metric-tile metric-tile--comparison metric-tile--${trend}`);
+        tile.dataset.key = key;
+        tile.append(node("dt", label));
+        const value = node("dd", null, "metric-value");
+        value.append(node("strong", right));
+        tile.append(value);
+        tile.append(node("p", `A ${left} → B ${right} (Δ ${delta})`, "plot-note"));
+        tiles.append(tile);
+      });
+      card.append(tiles);
+      cardsList.push(card);
+    }
+    const distLeft = primaryOutput.results.find((item) => item.method === "distribution")?.result;
+    const distRight = secondaryOutput.results.find((item) => item.method === "distribution")?.result;
+    if (distLeft?.status === "ok" && distRight?.status === "ok" &&
+        distLeft.plots?.[0]?.series?.length && distRight.plots?.[0]?.series?.length) {
+      const card = node("article", null, "analysis-card");
+      const header = node("header", null, "analysis-card-header");
+      const title = node("div", null, "analysis-card-title");
+      title.append(node("h3", "Residual distribution overlap"));
+      header.append(title); card.append(header);
+      const fitLeft = analysisCardSummary("distribution", distLeft.metrics).metrics;
+      const fitRight = analysisCardSummary("distribution", distRight.metrics).metrics;
+      const fitTiles = node("dl", null, "analysis-metrics");
+      comparisonMetricTiles(fitLeft, fitRight).forEach(({key, label, left, right, delta, trend}) => {
+        const tile = node("div", null, `metric-tile metric-tile--comparison metric-tile--${trend}`);
+        tile.dataset.key = key;
+        tile.append(node("dt", label));
+        const value = node("dd", null, "metric-value");
+        value.append(node("strong", right));
+        tile.append(value);
+        tile.append(node("p", `A ${left} → B ${right} (Δ ${delta})`, "plot-note"));
+        fitTiles.append(tile);
+      });
+      if (fitTiles.children.length) card.append(fitTiles);
+      const canvas = node("canvas");
+      const plot = {
+        x_label: distLeft.plots[0].x_label,
+        y_label: distLeft.plots[0].y_label,
+        series: overlaySeries(
+          distLeft.plots[0].series, distRight.plots[0].series, primaryLabel, secondaryLabel, preferences.compare_show_fits
+        ),
+      };
+      canvas.setAttribute("aria-label", `Distribution overlap: ${plot.x_label}; ${plot.y_label}`);
+      card.append(canvas);
+      const labels = comparisonLegendLabels(plot.series);
+      if (labels.length) card.append(node("p", labels.join(" / "), "plot-note"));
+      cardsList.push(card);
+      nextPlots.push({canvas, plot});
+    }
+    if (!cardsList.length) {
+      cardsList.push(node("p", "Comparison needs both statistics and distribution results for the selected batches.", "plot-note"));
+    }
+    cardsNode.replaceChildren(...cardsList);
+    plots = nextPlots;
+    cards = new Map();
+    hasResults = true;
+    plots.forEach(({canvas, plot}) => drawAnalysisChart(canvas, plot));
+  }
+  function setComparisonMode(enabled) {
+    for (const id of ["analysis-scope", "analysis-run-from", "analysis-run-to"]) byId(id).disabled = enabled;
+    const excludePanel = byId("analysis-exclude");
+    if (enabled) excludePanel.open = false;
+    byId("analysis-exclude-summary").textContent = enabled
+      ? "Exclude runs (disabled while comparing batches)"
+      : excluded.size ? `Exclude runs (${excluded.size} excluded)` : "Exclude runs";
   }
   const excluded = new Set();
   let excludeKey = null;
@@ -366,6 +593,7 @@ function startAnalysisPanel({request, showError}) {
     for (const key of ["field", "fit", "histogram_bins", "components", "seed"]) {
       byId("analysis-settings").querySelector(`[name="${key}"]`).value = preferences[key];
     }
+    byId("analysis-settings").querySelector('[name="compare_show_fits"]').checked = preferences.compare_show_fits;
     byId("analysis-methods").replaceChildren();
     for (const [id, definition] of Object.entries(catalogue)) {
       const label = node("label", null, "check"), input = node("input");
@@ -378,6 +606,7 @@ function startAnalysisPanel({request, showError}) {
       const candidate = {
         field: byId("analysis-settings").querySelector('[name="field"]').value,
         fit: byId("analysis-settings").querySelector('[name="fit"]').value,
+        compare_show_fits: byId("analysis-settings").querySelector('[name="compare_show_fits"]').checked,
       };
       for (const key of ["histogram_bins", "components", "seed"]) {
         const raw = byId("analysis-settings").querySelector(`[name="${key}"]`).value;
@@ -408,12 +637,18 @@ function startAnalysisPanel({request, showError}) {
       const listKey = `${batchState.batch_id}:${batchState.active}:${batchState.outcome}`;
       if (batchesKey !== listKey) {
         const batches = (await request("/api/experiments")).batches;
-        const dataset = byId("analysis-dataset"), previous = dataset.value;
+        const dataset = byId("analysis-dataset"), compareDataset = byId("analysis-compare-dataset");
+        const previous = dataset.value, previousCompare = compareDataset.value;
         dataset.replaceChildren(new Option("Current / latest batch", ""));
+        compareDataset.replaceChildren(new Option("No comparison", ""));
         for (const batch of batches) dataset.append(new Option(
           `${batch.config.name} - ${batch.started_at.slice(0, 19)} - ${batch.outcome}`, batch.batch_id
         ));
+        for (const batch of batches) compareDataset.append(new Option(
+          `${batch.config.name} - ${batch.started_at.slice(0, 19)} - ${batch.outcome}`, batch.batch_id
+        ));
         dataset.value = previous;
+        compareDataset.value = previousCompare;
         batchesKey = listKey;
       }
       const batchId = byId("analysis-dataset").value || batchState.batch_id;
@@ -421,46 +656,61 @@ function startAnalysisPanel({request, showError}) {
         byId("analysis-state").textContent = "Start a batch or select saved data";
         return;
       }
-      const batch = await request(`/api/experiments/${encodeURIComponent(batchId)}`);
+      const compareId = byId("analysis-compare-dataset").value;
+      const compareActive = compareId && compareId !== batchId;
+      setComparisonMode(compareActive);
+      const [batch, compareBatch] = await Promise.all([
+        request(`/api/experiments/${encodeURIComponent(batchId)}`),
+        compareActive ? request(`/api/experiments/${encodeURIComponent(compareId)}`) : Promise.resolve(null),
+      ]);
       if (generation !== startedGeneration) return;
       const scope = byId("analysis-scope"), priorScope = scope.value;
       scope.replaceChildren(new Option("All runs (all samples)", "batch"), new Option("Latest / current run", "current"));
       batch.runs.filter((run) => run.session).forEach((run) => scope.append(new Option(`${run.run_id} - ${run.state}`, run.run_id)));
       scope.value = [...scope.options].some((option) => option.value === priorScope) ? priorScope : "batch";
       renderExperimentConfig(batch);
-      renderExcludeList(batch);
-      byId("run-comparison").replaceChildren(table(
-        ["Run", "State", "Eligible n", "Excluded n", "Yield (%)", "Bias (m)", "Sample std. (m)", "RMSE (m)"],
-        batch.runs.map((run) => {
-          const summary = run.summaries?.[preferences.field] || {};
-          return [run.run_id, run.state, summary.count ?? 0, run.excluded_count ?? 0,
-            run.sample_yield_pct, summary.bias_m, summary.std_m, summary.rmse_m];
-        })
-      ));
+      if (!compareActive) renderExcludeList(batch);
+      else byId("analysis-exclude-list").replaceChildren();
+      renderRunComparison(batch, compareBatch);
       const selectedRuns = batch.runs.filter((run) => run.session &&
         (scope.value === "batch" || scope.value === "current" || scope.value === run.run_id));
-      const closed = scope.value === "current"
+      const closedPrimary = scope.value === "current"
         ? selectedRuns.at(-1)?.state !== "recording"
         : selectedRuns.every((run) => run.state !== "recording");
-      byId("analysis-full").disabled = !selectedRuns.length || !closed;
+      const closedSecondary = !compareBatch || compareBatch.runs
+        .filter((run) => run.session)
+        .every((run) => run.state !== "recording");
+      byId("analysis-full").disabled = !selectedRuns.length || !closedPrimary || !closedSecondary;
       if (selection) {
-        const job = await request(`/api/analysis/jobs/${selection.jobId}`);
-        if (generation !== startedGeneration || !resultMatches(selection, job)) return;
-        if (["queued", "running"].includes(job.state)) {
+        const jobs = await Promise.all(selection.jobs.map(async (entry) => ({
+          entry, job: await request(`/api/analysis/jobs/${entry.jobId}`),
+        })));
+        if (generation !== startedGeneration) return;
+        if (jobs.some(({entry, job}) => !resultMatches(entry, job))) return;
+        if (jobs.some(({job}) => ["queued", "running"].includes(job.state))) {
+          const running = jobs.find(({job}) => ["queued", "running"].includes(job.state))?.job.state || "running";
           byId("analysis-state").textContent = hasResults
-            ? "Updating..." : `Analysis ${job.state}`;
+            ? "Updating..." : `Analysis ${running}`;
           return;
         }
-        if (job.state === "failed") throw new Error(job.error);
-        if (job.state === "superseded") { selection = null; dirty = true; }
+        const failed = jobs.find(({job}) => job.state === "failed");
+        if (failed) throw new Error(failed.job.error);
+        if (jobs.some(({job}) => job.state === "superseded")) { selection = null; dirty = true; }
         else {
-          render(job.output);
+          const primaryOutput = jobs.find(({entry}) => entry.role === "primary")?.job.output;
+          const secondaryOutput = jobs.find(({entry}) => entry.role === "secondary")?.job.output;
+          if (compareBatch && secondaryOutput) {
+            renderComparison(batch, primaryOutput, compareBatch, secondaryOutput);
+          } else {
+            render(primaryOutput);
+          }
           showError("analysis-error", "");
           byId("analysis-state").textContent = mode === "full" ? "Saved results" : "Updated";
           selection = null; lastComputed = Date.now();
         }
       }
-      if (!dirty && (mode === "full" || batch.outcome !== "running" || Date.now() - lastComputed < 2000)) return;
+      if (!dirty && (mode === "full" || (batch.outcome !== "running" && (!compareBatch || compareBatch.outcome !== "running")) ||
+        Date.now() - lastComputed < 2000)) return;
       const scopeValue = scope.value;
       const runNumber = (id) => Number.parseInt(byId(id).value, 10) || null;
       const runFrom = runNumber("analysis-run-from"), runTo = runNumber("analysis-run-to");
@@ -469,9 +719,28 @@ function startAnalysisPanel({request, showError}) {
         exclude_runs: [...excluded],
         scope: ["current", "batch"].includes(scopeValue) ? scopeValue : "run",
         run_id: ["current", "batch"].includes(scopeValue) ? null : scopeValue};
-      const job = await request("/api/analysis/jobs", {method: "POST", body: JSON.stringify(recipe)});
+      if (compareActive) {
+        recipe.scope = "batch";
+        recipe.run_id = null;
+        recipe.run_from = null;
+        recipe.run_to = null;
+        recipe.exclude_runs = [];
+      }
+      const jobs = [{role: "primary", recipe}];
+      if (compareBatch) {
+        jobs.push({role: "secondary", recipe: {...recipe, batch_id: compareBatch.batch_id}});
+      }
+      const submitted = await Promise.all(jobs.map(async (entry) => ({
+        role: entry.role,
+        batchId: entry.recipe.batch_id,
+        job: await request("/api/analysis/jobs", {method: "POST", body: JSON.stringify(entry.recipe)}),
+      })));
       if (generation !== startedGeneration) return;
-      selection = {jobId: job.job_id, recipeKey: job.recipe_key}; dirty = false;
+      selection = {jobs: submitted.map((entry) => ({
+        role: entry.role, batchId: entry.batchId,
+        jobId: entry.job.job_id, recipeKey: entry.job.recipe_key,
+      }))};
+      dirty = false;
       byId("analysis-state").textContent = hasResults
         ? "Updating..." : "Analysis queued";
     } catch (error) {
@@ -485,7 +754,7 @@ function startAnalysisPanel({request, showError}) {
     }
   }
   byId("analysis-settings").addEventListener("change", changed);
-  for (const id of ["analysis-dataset", "analysis-scope", "analysis-run-from", "analysis-run-to"]) {
+  for (const id of ["analysis-dataset", "analysis-compare-dataset", "analysis-scope", "analysis-run-from", "analysis-run-to"]) {
     byId(id).addEventListener("change", () => { mode = "cumulative"; invalidate(); tick(); });
   }
   byId("analysis-full").addEventListener("click", () => { mode = "full"; invalidate(); tick(); });
@@ -512,5 +781,6 @@ function startAnalysisPanel({request, showError}) {
 
 if (typeof module !== "undefined") module.exports = {
   validateAnalysisPreferences, resultMatches, chartBounds, formatAnalysisValue, analysisCardSummary,
-  analysisSourceSummary, analysisLegendLabels,
+  analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, comparisonMetricTiles,
+  overlaySeries, colorWithAlpha, comparisonDeltaClass, comparisonLegendLabels,
 };

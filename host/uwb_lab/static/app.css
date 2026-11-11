@@ -228,7 +228,7 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 /* ---------- 8. Noise analysis ---------- */
 .analysis-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 12px; margin-bottom: 10px; }
 .analysis-panel progress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--green); }
-.analysis-selection { display: grid; grid-template-columns: 2fr 2fr 1fr 1fr; gap: 8px; }
+.analysis-selection { display: grid; grid-template-columns: 2fr 2fr 2fr 1fr 1fr; gap: 8px; }
 .exclude-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11px; }
 .exclude-list label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .analysis-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
@@ -250,6 +250,12 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .analysis-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
 .analysis-metrics .metric-tile { display: grid; flex: 1 1 120px; align-content: start; gap: 5px; min-width: max-content; padding: 10px; border: 1px solid #e1e8e4; border-radius: 6px; background: #f5f8f6; }
 .analysis-metrics .metric-tile--primary { flex-basis: 100%; padding: 12px; border-color: #c8dde5; border-left: 3px solid var(--blue); background: #edf5f8; }
+.analysis-metrics .metric-tile--comparison { flex-basis: min(220px, 100%); }
+.analysis-metrics .metric-tile--comparison .metric-value strong { font-size: 24px; }
+.analysis-metrics .metric-tile--up { border-color: #8ed8b6; background: #e8f7ef; }
+.analysis-metrics .metric-tile--up .metric-value strong { color: #087f5b; }
+.analysis-metrics .metric-tile--down { border-color: #f0b2b6; background: #fbecee; }
+.analysis-metrics .metric-tile--down .metric-value strong { color: #b63036; }
 .analysis-metrics dt { font-size: 11px; line-height: 1.4; }
 .analysis-metrics .metric-value { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 5px; white-space: nowrap; }
 .metric-value strong { font: 600 21px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
@@ -325,6 +331,10 @@ form button:hover { background: #0a9a70; }
 .analysis-badge, .analysis-metrics .metric-tile, .analysis-method-details { border-color: #2c3834; }
 .analysis-badge--method, .analysis-metrics .metric-tile--primary { border-color: #2d5667; }
 .analysis-notice { background: #3d3216; color: #f0cf8a; }
+.analysis-metrics .metric-tile--up { border-color: #235d49; background: #1b2f28; }
+.analysis-metrics .metric-tile--up .metric-value strong { color: #3ecf9f; }
+.analysis-metrics .metric-tile--down { border-color: #6d3038; background: #351f22; }
+.analysis-metrics .metric-tile--down .metric-value strong { color: #ff6b72; }
 
 /* Header state labels ("No prior", "Idle") and batch progress bar */
 .control-panel > summary > span { background: #1f3a4a; color: #8fd3ea; border: 1px solid #2d5667; }

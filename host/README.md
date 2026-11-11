@@ -94,6 +94,11 @@ for physical meaning and comparison advice.
 
 The noise analysis **From run # / To run #** fields (blank = no limit) restrict the analysis to a range of runs, e.g. to drop bad runs at the start or end.
 The **Exclude runs** drop-down has a checkbox per run to leave individual runs out of the analysis.
+The **Compare with** selector overlays two batches for residual comparison: it uses all recorded runs from both batches,
+adds residual-metric deltas (B - A), and overlays both histograms/fitted curves with transparency.
+When comparison is active, run-range and per-run exclusion controls are disabled.
+Use **Show fitted curves in batch comparison** to toggle fitted overlays on top of the histogram bars.
+Set **Distribution model** to **Auto (best AIC per dataset)** to let each compared batch pick its own best model.
 In the noise analysis, the collapsible **Experiment configuration** section lists the selected dataset's
 settings as recorded in its manifest: batch settings, prior, and the TX/RX radio configuration.
 
@@ -116,6 +121,7 @@ boards as separate sessions. Discarded USB lines are counted, not hidden.
    manual recording, throughout the batch including intervals.
 4. Choose methods in **Analysis setup**, then select a batch and all/current/specific
    runs below the signal plots. All runs are selected by default.
+   Optionally select a second batch in **Compare with** to compare both full batches.
 5. **Recompute full closed dataset** saves results and provenance separately from telemetry.
 
 The host owns scheduling: closing or refreshing the browser does not stop a batch.

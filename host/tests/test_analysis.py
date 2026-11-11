@@ -12,6 +12,8 @@ def test_analysis_contracts():
     request = AnalysisRequest(batch_id="batch-a", scope="run", run_id="run-1")
     assert request.field == "corrected_m"
     assert request.mode == "cumulative"
+    assert AnalysisRequest(batch_id="batch-a", fit="auto").fit == "auto"
+    assert AnalysisRequest(batch_id="batch-a", compare_show_fits=False).compare_show_fits is False
     assert AnalysisRequest(batch_id="batch-a").scope == "batch"
     with pytest.raises(ValidationError):
         AnalysisRequest(batch_id="batch-a", scope="run")
@@ -85,6 +87,9 @@ def test_every_distribution_fit_draws_histogram_plus_curve_and_compares_models()
     aics = [row[1] for row in comparison.rows]
     assert aics == sorted(aics)
     assert comparison.rows[0][0].startswith("Log-normal") or comparison.rows[0][0].startswith("Skew")
+    auto = distribution_fit(values, 25, "auto", 2, 0)
+    assert auto.status == "ok"
+    assert auto.plots[0].series[1].label in {row[0] for row in auto.tables[1].rows}
 
 
 def test_psd_recovers_device_timed_tone_and_checks_thresholds():

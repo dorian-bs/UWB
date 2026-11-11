@@ -3,7 +3,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { experimentPayload, experimentLocked } = require("../uwb_lab/static/experiments.js");
-const { resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue, analysisCardSummary, analysisSourceSummary, analysisLegendLabels } = require("../uwb_lab/static/analysis.js");
+const {
+  resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue, analysisCardSummary,
+  analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, overlaySeries, colorWithAlpha,
+  comparisonDeltaClass, comparisonMetricTiles, comparisonLegendLabels,
+} = require("../uwb_lab/static/analysis.js");
 
 test("experiment inputs preserve duration, integer repetitions and interval", () => {
   assert.deepEqual(experimentPayload({
@@ -33,11 +37,13 @@ test("analysis axes support constant series and reject malformed numeric results
 test("analysis preferences are independent and validate persisted methods", () => {
   const preferences = validateAnalysisPreferences({
     field:"raw_m", methods:["statistics","gmm"], window_size:100,
-    histogram_bins:20, max_lag:10, components:3, seed:4,
+    histogram_bins:20, max_lag:10, components:3, seed:4, compare_show_fits: true,
   });
   assert.deepEqual(preferences.methods, ["statistics","distribution"]);
   assert.equal(preferences.fit, "gmm", "legacy GMM selection becomes the GMM distribution model");
   assert.equal(preferences.components, 3);
+  assert.equal(preferences.compare_show_fits, true);
+  assert.equal(validateAnalysisPreferences({methods:["statistics"]}).compare_show_fits, false);
   assert.throws(() => validateAnalysisPreferences({...preferences, fit:"invented"}));
   assert.throws(() => validateAnalysisPreferences({...preferences, histogram_bins:201}));
   assert.throws(() => validateAnalysisPreferences({...preferences, methods:["invented"]}));
@@ -58,6 +64,85 @@ test("analysis display uses three decimal places without changing counts or hidi
   assert.equal(formatAnalysisValue(NaN, "m"), "--");
   assert.equal(formatAnalysisValue(0.01234, "m", true), "+0.012");
   assert.equal(formatAnalysisValue(-0.00001, "m", true), "0.000");
+});
+
+test("comparison tables keep metric order and show per-batch deltas", () => {
+  const rows = comparisonMetricRows(
+    [{key: "bias_m", label: "Bias", value: 0.01, unit: "m"}, {key: "std_m", label: "Std dev", value: 0.02, unit: "m"}],
+    [{key: "bias_m", label: "Bias", value: 0.013, unit: "m"}, {key: "std_m", label: "Std dev", value: 0.018, unit: "m"}]
+  );
+  assert.deepEqual(rows, [
+    ["Bias", "0.010", "0.013", "+0.003"],
+    ["Std dev", "0.020", "0.018", "-0.002"],
+  ]);
+});
+
+test("comparison metric tiles include trend metadata for boxed rendering", () => {
+  const tiles = comparisonMetricTiles(
+    [{key: "bias_m", label: "Bias", value: 0.01, unit: "m"}],
+    [{key: "bias_m", label: "Bias", value: 0.013, unit: "m"}]
+  );
+  assert.deepEqual(tiles, [{
+    key: "bias_m",
+    label: "Bias",
+    left: "0.010",
+    right: "0.013",
+    delta: "+0.003",
+    trend: "up",
+  }]);
+});
+
+test("comparison overlay keeps only empirical histograms and applies stronger opacity", () => {
+  const series = overlaySeries(
+    [{label: "Empirical density", style: "bars", x: [0, 1, 2], y: [1, 2, 3]}, {label: "Gaussian", style: "line", x: [0], y: [1]}],
+    [{label: "Empirical density", style: "bars", x: [0.5, 1.5, 2.5], y: [3, 2, 1]}, {label: "Laplace", style: "line", x: [0], y: [1]}],
+    "A", "B"
+  );
+  assert.equal(series.length, 2);
+  assert.equal(series[0].label, "Empirical density (A)");
+  assert.equal(series[0].alpha, 0.62);
+  assert.equal(series[1].alpha, 0.62);
+  assert.ok(series.every((curve) => curve.style === "bars"));
+  assert.equal(series[1].label, "Empirical density (B)");
+  assert.deepEqual(series[0].x, [0, 1, 2], "batch A bins should be the alignment anchor");
+  assert.deepEqual(series[1].x, [0, 1, 2], "batch B bins should align to batch A without centering");
+  assert.ok(series[0].y.every((value) => value > 0), "aligned batch A bars should stay filled");
+  assert.ok(series[1].y.every((value) => value > 0), "aligned batch B bars should stay filled");
+});
+
+test("comparison overlay can include fitted curves when requested", () => {
+  const series = overlaySeries(
+    [{label: "Empirical density", style: "bars", x: [0, 1], y: [1, 2]}, {label: "Gaussian", style: "line", x: [0, 1], y: [1, 1]}],
+    [{label: "Empirical density", style: "bars", x: [0.2, 1.2], y: [2, 1]}, {label: "Laplace", style: "line", x: [0.2, 1.2], y: [1, 1]}],
+    "A", "B", true
+  );
+  assert.equal(series.length, 4);
+  assert.ok(series.some((curve) => curve.label === "Gaussian (A)" && curve.style === "line" && curve.alpha === 1));
+  assert.ok(series.some((curve) => curve.label === "Laplace (B)" && curve.style === "line" && curve.alpha === 1));
+  const gaussian = series.find((curve) => curve.label === "Gaussian (A)").x;
+  const laplace = series.find((curve) => curve.label === "Laplace (B)").x;
+  gaussian.forEach((value, index) => assert.ok(Math.abs(value - [0, 1][index]) < 1e-9));
+  laplace.forEach((value, index) => assert.ok(Math.abs(value - [0, 1][index]) < 1e-9));
+});
+
+test("comparison delta color direction maps larger to green and smaller to red", () => {
+  assert.equal(comparisonDeltaClass(0.01), "up");
+  assert.equal(comparisonDeltaClass(-0.01), "down");
+  assert.equal(comparisonDeltaClass(0), "same");
+  assert.equal(comparisonDeltaClass(null), "same");
+});
+
+test("comparison legend labels are intentionally suppressed", () => {
+  assert.deepEqual(
+    comparisonLegendLabels([{label: "Empirical density (A)"}, {label: "Gaussian (B)"}]),
+    []
+  );
+});
+
+test("hex chart colors can be converted to rgba transparency", () => {
+  assert.equal(colorWithAlpha("#176b87", 0.5), "rgba(23, 107, 135, 0.5)");
+  assert.equal(colorWithAlpha("#abc", 0.25), "rgba(170, 187, 204, 0.25)");
+  assert.equal(colorWithAlpha("#176b87", 1), "#176b87");
 });
 
 test("statistic values and units stay together while tiles reflow", () => {

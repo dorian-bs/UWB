@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 data/sessions/
 docs/superpowers/
+cv.tex
 
 # macOS
 .DS_Store
