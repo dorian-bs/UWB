@@ -57,7 +57,7 @@ class Runtime:
         self.task: asyncio.Task[None] | None = None
         self.sample_rate = SampleRate()
         self.exchange_quality = ExchangeQuality()
-        self.quality_period_ms: int | None = None
+        self.quality_config: tuple[Any, ...] | None = None
         self.radio: RadioControl | None = None
         if self.source == "dual-serial":
             tx_port = os.getenv("UWB_SERIAL_PORT", "")
@@ -104,6 +104,7 @@ class Runtime:
         sample = self.state.add_line(line)
         if sample is None:
             return
+        requested = self.track_radio_config(self.radio.status() if self.radio else {})
         if sample["valid"]:
             self.sample_rate.add(received_at)
             self.exchange_quality.add(sample["seq"], received_at)
@@ -122,6 +123,10 @@ class Runtime:
                     self.experiments.stop("failed", self.last_error)
                 except OSError as close_error:
                     logger.exception("Failed to finalize recording: %s", close_error)
+        if requested is not None and sample["valid"]:
+            # Plot-only values derived from arrival times; added after recording so files keep the raw record.
+            sample["rate_hz"] = self.sample_rate.recent()
+            sample["requested_hz"] = requested
         stale_clients: list[WebSocket] = []
         for client in tuple(self.clients):
             try:
@@ -136,18 +141,26 @@ class Runtime:
             except (TimeoutError, WebSocketDisconnect, RuntimeError, OSError) as error:
                 logger.warning("Dashboard client could not be closed: %s", error)
 
-    def sample_quality(self, radio: dict[str, Any]) -> dict[str, float | None]:
-        """Observed rate against the rate the TX board is configured for, and per-attempt success."""
+    def track_radio_config(self, radio: dict[str, Any]) -> float | None:
+        """Requested rate of the TX board; restarts the rate windows when its radio settings change."""
         tx = (radio.get("boards") or {}).get("tx") or {}
-        period_ms = (tx.get("state") or {}).get("period_ms")
-        if period_ms and period_ms != self.quality_period_ms:
-            # Samples from the previous rate and the pause while applying it would skew the window.
-            if self.quality_period_ms is not None:
+        state = tx.get("state") or {}
+        period_ms = state.get("period_ms")
+        if not period_ms:
+            return None
+        key = (period_ms, state.get("channel"), state.get("preamble"), state.get("data_rate"))
+        if key != self.quality_config:
+            # Samples from the previous settings and the pause while applying them would skew the window.
+            if self.quality_config is not None:
                 self.sample_rate.times.clear()
                 self.exchange_quality.recent.clear()
-            self.quality_period_ms = period_ms
+            self.quality_config = key
+        return 1000 / period_ms
+
+    def sample_quality(self, radio: dict[str, Any]) -> dict[str, float | None]:
+        """Observed rate against the rate the TX board is configured for, and per-attempt success."""
+        requested = self.track_radio_config(radio)
         observed = self.sample_rate.value()
-        requested = 1000 / period_ms if period_ms else None
         yield_pct = 100 * observed / requested if requested and observed is not None else None
         return {
             "requested_hz": requested,

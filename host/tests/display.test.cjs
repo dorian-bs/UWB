@@ -167,8 +167,15 @@ test("calibration status message preserves sticky autostop notice when no new st
 test("radio form converts units and validates raw TX power without silent coercion", () => {
   const fields = { sampling_hz: "5", channel: "9", preamble: "128", data_rate: "6800", tx_power: "0xFEFEFEFE" };
   assert.deepEqual(plain(api.radioPayload(fields)), {
-    sampling_hz: 5, channel: 9, preamble: 128, data_rate: 6800, tx_power: 0xFEFEFEFE,
+    sampling_hz: 5, channel: 9, preamble: 128, data_rate: 6800, tx_power: 0xFEFEFEFE, jitter_ms: 0,
   });
+  // The jitter value only counts while its box is ticked, and must leave 10 ms between exchanges.
+  assert.equal(api.radioPayload({ ...fields, jitter_ms: "3" }).jitter_ms, 0);
+  assert.equal(api.radioPayload({ ...fields, jitter_enabled: "on", jitter_ms: "3" }).jitter_ms, 3);
+  for (const changes of [{ jitter_ms: "" }, { jitter_ms: "0" }, { jitter_ms: "1.5" }, { jitter_ms: "51" },
+    { jitter_ms: "20", sampling_hz: "50" }]) {
+    assert.throws(() => api.radioPayload({ ...fields, jitter_enabled: "on", ...changes }));
+  }
   for (const changes of [
     { sampling_hz: "" }, { sampling_hz: "0" }, { sampling_hz: "51" },
     { sampling_hz: "NaN" }, { channel: "7" }, { preamble: "65" }, { data_rate: "110" },
@@ -281,6 +288,19 @@ test("plot render data contains only its selected traces and own bounds", () => 
   assert.equal(empty.selected.length, 0);
 });
 
+test("rate traces share one axis that starts at zero, and older saved settings gain it", () => {
+  const samples = [{ rate_hz: 9.5, requested_hz: 10 }, { rate_hz: 7, requested_hz: 10 }];
+  const plot = api.getPlotData(samples, { ...api.DEFAULTS, series: ["rate_hz", "requested_hz"] });
+  assert.deepEqual(plain(plot.selected.map((s) => s.family)), ["rate", "rate"]);
+  assert.equal(plot.bounds.rate[0], 0);
+  assert.ok(plot.bounds.rate[1] > 10);
+  const legacy = plain(api.DEFAULTS);
+  delete legacy.rate;
+  delete legacy.secondPlot.rate;
+  assert.deepEqual(plain(api.validatePreferences(legacy)), plain(api.DEFAULTS));
+  assert.throws(() => api.validatePreferences({ ...api.DEFAULTS, rate: { auto: false, min: 5, max: 5 } }));
+});
+
 test("sample buffer is bounded and changing display count does not discard history", () => {
   const state = api.createViewState(20);
   for (let seq = 1; seq <= 30; seq++) state.add({ seq });
@@ -363,7 +383,7 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
     WebSocket: class { constructor() { sockets.push(this); } },
     setInterval: (callback) => ticks.push(callback), setTimeout() {},
     startExperimentPanel: () => ({update() {}}), startAnalysisPanel: () => ({update() {}}),
-    formatAnalysisValue: (value) => Number.isFinite(value) ? String(value) : "--",
+    formatAnalysisValue: require("../uwb_lab/static/analysis.js").formatAnalysisValue,
     chartTheme: () => ({text: "", grid: "", zero: "", series: {}}),
     fetch: async (path, options) => {
       if (options.method === "POST") posts.push([path, JSON.parse(options.body || "{}")]);
@@ -383,6 +403,15 @@ test("dashboard wires hardware capture, server preview, apply and reset without 
   vm.runInContext(script, sandbox);
   await sockets[0].onopen();
   await ticks[0]();
+  for (const [value, expected] of [[0.012, "+0.012"], [-0.012, "-0.012"], [0, "+0.000"],
+    [-0.00001, "+0.000"], [null, "--"]]) {
+    sockets[0].onmessage({data: JSON.stringify({type: "sample", sample: {
+      corrected_m: 2.123, residual_m: value, rolling_bias_m: value,
+    }})});
+    assert.equal(byId("residual-value").textContent, expected);
+    assert.equal(byId("bias-value").textContent, expected);
+    assert.equal(byId("range-value").textContent, "2.123");
+  }
   assert.equal(byId("calibration-apply").disabled, true);
   byId("calibration-form").fields = {
     known_distance_m: "5", target_samples: "3", tolerance_m: "0.01", dtu_per_cm: "999",

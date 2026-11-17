@@ -63,7 +63,11 @@ test("analysis display uses three decimal places without changing counts or hidi
   assert.equal(formatAnalysisValue(null, "m"), "--");
   assert.equal(formatAnalysisValue(NaN, "m"), "--");
   assert.equal(formatAnalysisValue(0.01234, "m", true), "+0.012");
-  assert.equal(formatAnalysisValue(-0.00001, "m", true), "0.000");
+  assert.equal(formatAnalysisValue(-0.00001, "m", true), "+0.000");
+  assert.equal(formatAnalysisValue(0, "m", true), "+0.000");
+  assert.equal(formatAnalysisValue(0.00001, "m", true), "+0.000");
+  assert.equal(formatAnalysisValue(-0.01234, "m", true), "-0.012");
+  assert.equal(formatAnalysisValue(null, "m", true), "--");
 });
 
 test("comparison tables keep metric order and show per-batch deltas", () => {

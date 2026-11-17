@@ -763,6 +763,7 @@ typedef struct
     uint32_t tx_counter;
     uint32_t rx_counter;
     uint32_t last_tx_tick;
+    uint32_t tx_interval_ms;
     uint8_t initialised;
     uint8_t tx_busy;
 
@@ -798,6 +799,25 @@ typedef struct
 } qorvo_link_ctx_t;
 
 static qorvo_link_ctx_t g_link = {0};
+
+/* Interval before the next poll: the period, plus a uniform random offset of up to +/-jitter_ms. */
+static uint32_t qorvo_next_tx_interval_ms(void)
+{
+    static uint32_t rng;
+    const qorvo_radio_state_t *state = qorvo_control_state();
+    uint32_t jitter = state->jitter_ms;
+
+    if (jitter == 0U) {
+        return state->period_ms;
+    }
+    if (rng == 0U) {
+        rng = DWT->CYCCNT | 1U;
+    }
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return state->period_ms - jitter + (rng % (2U * jitter + 1U));
+}
 
 static void qorvo_clear_status_events(void);
 static void qorvo_reset_exchange_timestamps(void);
@@ -840,6 +860,7 @@ bool qorvo_control_resume(void)
     __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
     HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
     g_link.last_tx_tick = qorvo_sched_now();
+    g_link.tx_interval_ms = qorvo_control_state()->period_ms;
     if (g_link.role == QORVO_ROLE_RX) {
         dwt_setrxtimeout(0U);
         dwt_setpreambledetecttimeout(0U);
@@ -1964,9 +1985,10 @@ void qorvo_link_process(void)
 
         if ((g_link.state == QORVO_STATE_IDLE) &&
             (g_link.tx_busy == 0U) &&
-            ((now - g_link.last_tx_tick) >= qorvo_control_state()->period_ms)) {
+            ((now - g_link.last_tx_tick) >= g_link.tx_interval_ms)) {
 
             g_link.last_tx_tick = now;
+            g_link.tx_interval_ms = qorvo_next_tx_interval_ms();
             g_link.current_exchange_counter = ++g_link.tx_counter;
             g_link.peer_board_id = 0U;
             qorvo_reset_exchange_timestamps();

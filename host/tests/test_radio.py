@@ -56,6 +56,7 @@ class BoardSimulator:
             self.snapshot["running"] = True
         elif action == "SET":
             keys = ("revision", "period_ms", "channel", "preamble", "data_rate", "tx_power")
+            keys += ("tx_ant_dly", "rx_ant_dly", "jitter_ms")[: len(args) - len(keys)]
             self.snapshot.update(zip(keys, args, strict=True))
         if self.fail == action or (self.fail_rollback and action == "SET"):
             self.fail = None
@@ -94,6 +95,37 @@ def test_radio_validation_and_period_quantization():
         payload = config().model_dump() | {field: value}
         with pytest.raises(ValidationError):
             radio.RadioConfig(**payload)
+
+
+def test_jitter_must_leave_a_usable_interval():
+    radio = radio_module()
+    assert config().jitter_ms == 0
+    assert config(jitter_ms=50).jitter_ms == 50  # 200 ms period
+    fast = {"sampling_hz": 50, "channel": 9, "preamble": 128, "data_rate": 6800, "tx_power": 0xFEFEFEFE}
+    assert radio.RadioConfig(**fast, jitter_ms=10).jitter_ms == 10
+    for jitter in (11, 51, -1, 1.5):
+        with pytest.raises(ValidationError):
+            radio.RadioConfig(**fast, jitter_ms=jitter)
+
+
+def test_jitter_reaches_boards_that_report_it_and_is_refused_by_older_firmware():
+    async def scenario():
+        control, tx, rx = pair()
+        for board in (tx, rx):  # an old board neither reports nor accepts the jitter word
+            board.snapshot |= {"tx_ant_dly": 16000, "rx_ant_dly": 16000}
+        with pytest.raises(radio_module().ControlError, match="updated firmware"):
+            await control.apply(config(jitter_ms=4))
+        assert not any(action == "SET" for action, _ in tx.commands)
+
+        for board in (tx, rx):
+            board.snapshot["jitter_ms"] = 0
+            board.commands.clear()
+        await control.apply(config(jitter_ms=4))
+        sent = [args for action, args in tx.commands if action == "SET"]
+        assert sent[0][-3:] == (16000, 16000, 4)
+        assert tx.snapshot["jitter_ms"] == 4 and rx.snapshot["jitter_ms"] == 4
+
+    asyncio.run(scenario())
 
 
 def test_tx_power_presets_match_the_ui():
@@ -735,3 +767,53 @@ def test_sample_quality_restarts_when_the_requested_rate_changes():
     assert runtime.sample_rate.times
     runtime.sample_quality({"boards": {"tx": {"state": {"period_ms": 100}}}})
     assert not runtime.sample_rate.times and not runtime.exchange_quality.recent
+
+
+def test_sample_quality_restarts_when_the_preamble_changes():
+    from uwb_lab.app import Runtime
+
+    runtime = Runtime()
+    state = {"period_ms": 100, "channel": 9, "preamble": 128, "data_rate": 6800}
+    runtime.sample_quality({"boards": {"tx": {"state": state}}})
+    runtime.sample_rate.add(0)
+    runtime.exchange_quality.add(1, 0)
+    runtime.sample_quality({"boards": {"tx": {"state": {**state}}}})
+    assert runtime.sample_rate.times
+    runtime.sample_quality({"boards": {"tx": {"state": {**state, "preamble": 1024}}}})
+    assert not runtime.sample_rate.times and not runtime.exchange_quality.recent
+
+
+def test_ingest_adds_rate_and_requested_rate_to_streamed_samples():
+    from uwb_lab.app import Runtime
+
+    class FakeRadio:
+        def status(self):
+            return {
+                "boards": {
+                    "tx": {"state": {"period_ms": 100, "channel": 9, "preamble": 128, "data_rate": 6800}}
+                }
+            }
+
+    async def scenario():
+        runtime = Runtime()
+        runtime.radio = FakeRadio()
+        for seq in range(1, 6):
+            line = json.dumps(
+                {
+                    "type": "range",
+                    "v": 1,
+                    "board": 1,
+                    "peer": 2,
+                    "seq": seq,
+                    "time_ms": seq * 200,
+                    "raw_m": 2,
+                    "corrected_m": 2,
+                    "valid": True,
+                }
+            )
+            await runtime.ingest(line, seq * 0.2)
+        last = runtime.state.samples[-1]
+        assert last["requested_hz"] == 10
+        assert last["rate_hz"] == pytest.approx(5)
+
+    asyncio.run(scenario())

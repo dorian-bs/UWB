@@ -41,7 +41,7 @@ function formatAnalysisValue(value, unit = "", signed = false) {
     const rounded = Number(value.toFixed(3));
     formatted = (Object.is(rounded, -0) ? 0 : rounded).toFixed(3);
   }
-  return signed && Number(formatted) > 0 ? `+${formatted}` : formatted;
+  return signed && Number(formatted) >= 0 ? `+${formatted}` : formatted;
 }
 
 function analysisCardSummary(method, metrics) {
@@ -228,7 +228,7 @@ function chartTheme() {
   if (document.documentElement.dataset.theme === "light") {
     return {
       text: "#52615e", grid: "#dfe5e2", zero: "#8a9893", panel: "#fff",
-      series: {raw_m: "#536878", corrected_m: "#176b87", expected_m: "#966000", residual_m: "#b63036", rolling_bias_m: "#7851a9", rolling_std_m: "#087f5b"},
+      series: {raw_m: "#536878", corrected_m: "#176b87", expected_m: "#966000", residual_m: "#b63036", rolling_bias_m: "#7851a9", rolling_std_m: "#087f5b", rate_hz: "#0a8f5a", requested_hz: "#6b7a76"},
       curves: ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#b35c10"],
     };
   }

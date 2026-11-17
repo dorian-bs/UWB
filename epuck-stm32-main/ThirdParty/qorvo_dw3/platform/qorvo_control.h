@@ -15,6 +15,9 @@ typedef struct {
     /* Absolute DW register values, each limited to 0..65535. */
     uint32_t tx_ant_dly;
     uint32_t rx_ant_dly;
+    /* Each TX exchange interval is period_ms plus a uniform random -jitter_ms..+jitter_ms (0 = off).
+     * It breaks the fixed sampling cadence so periodic ranging errors do not alias to a tone. */
+    uint32_t jitter_ms;
     bool running;
 } qorvo_radio_state_t;
 

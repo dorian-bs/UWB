@@ -159,7 +159,10 @@ observed_hz = (number_of_recent_arrivals - 1) / (last_arrival - first_arrival)
 
 Before enough arrivals exist, the UI shows `--`. Stale arrivals eventually show zero;
 the staleness threshold depends on the recent cadence so slow requested rates are
-not immediately treated as stopped. Dual-USB telemetry retains its arrival timestamps
+not immediately treated as stopped. The window restarts when the channel, preamble, data rate
+or period changes. Preamble length itself does not change the rate: measured on hardware through the dashboard,
+20 Hz and 50 Hz requests gave 95-100% of the requested rate for every preamble (64-1024) at 850 kbps and 6.8 Mbps; only the shortest
+preamble (64 symbols) lost a few exchanges at 6.8 Mbps. Dual-USB telemetry retains its arrival timestamps
 through buffering: draining a queue is not interpreted as a burst of new measurements.
 This is still a host-arrival estimate, not an exact measurement of radio scheduling.
 USB buffering, failed exchanges, and dropped input can affect it. Compare it with

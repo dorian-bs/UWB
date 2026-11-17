@@ -5,7 +5,8 @@
  * a DFU flash of the image leaves this sector (and the saved settings) intact. */
 #define SETTINGS_ADDR   0x080E0000UL
 #define SETTINGS_SECTOR FLASH_SECTOR_11
-#define SETTINGS_MAGIC  0x55574231UL
+#define SETTINGS_MAGIC  0x55574232UL
+#define SETTINGS_MAGIC_V1 0x55574231UL
 
 typedef struct {
     uint32_t magic;
@@ -16,21 +17,31 @@ typedef struct {
     uint32_t tx_power;
     uint32_t tx_ant_dly;
     uint32_t rx_ant_dly;
+    uint32_t jitter_ms;
     uint32_t check;
 } settings_record_t;
 
+/* Same words without jitter_ms; records written by older firmware load with jitter off. */
+#define V1_WORDS 9U
+
+static uint32_t checksum_words(const uint32_t *words, size_t count)
+{
+    uint32_t sum = 0xA5A5A5A5UL;
+    for (size_t i = 0; i < count - 1U; i++) sum ^= words[i] + (uint32_t)i;
+    return sum;
+}
+
 static uint32_t checksum(const settings_record_t *r)
 {
-    const uint32_t *words = (const uint32_t *)r;
-    uint32_t sum = 0xA5A5A5A5UL;
-    for (size_t i = 0; i < (sizeof(*r) / 4U) - 1U; i++) sum ^= words[i] + (uint32_t)i;
-    return sum;
+    return checksum_words((const uint32_t *)r, sizeof(*r) / 4U);
 }
 
 bool qorvo_settings_load(qorvo_radio_state_t *state)
 {
     const settings_record_t *r = (const settings_record_t *)SETTINGS_ADDR;
-    if (r->magic != SETTINGS_MAGIC || r->check != checksum(r)) return false;
+    const uint32_t *words = (const uint32_t *)SETTINGS_ADDR;
+    bool v1 = r->magic == SETTINGS_MAGIC_V1 && words[V1_WORDS - 1U] == checksum_words(words, V1_WORDS);
+    if (!v1 && (r->magic != SETTINGS_MAGIC || r->check != checksum(r))) return false;
     state->period_ms = r->period_ms;
     state->channel = r->channel;
     state->preamble = r->preamble;
@@ -38,6 +49,7 @@ bool qorvo_settings_load(qorvo_radio_state_t *state)
     state->tx_power = r->tx_power;
     state->tx_ant_dly = r->tx_ant_dly;
     state->rx_ant_dly = r->rx_ant_dly;
+    state->jitter_ms = v1 ? 0U : r->jitter_ms;
     return true;
 }
 
@@ -47,6 +59,7 @@ bool qorvo_settings_save(const qorvo_radio_state_t *state)
         .magic = SETTINGS_MAGIC, .period_ms = state->period_ms, .channel = state->channel,
         .preamble = state->preamble, .data_rate = state->data_rate, .tx_power = state->tx_power,
         .tx_ant_dly = state->tx_ant_dly, .rx_ant_dly = state->rx_ant_dly,
+        .jitter_ms = state->jitter_ms,
     };
     r.check = checksum(&r);
 

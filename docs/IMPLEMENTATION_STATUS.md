@@ -12,7 +12,7 @@ the noise before adding more models.
 | Transport | Direct USB, dual USB, or the ESP32 single-client UART/TCP bridge |
 | Host | Demo and replay without boards; live acquisition, health counters, revisioned distance/3D-position priors |
 | Recording | NDJSON sessions with manifests, prior changes, and radio snapshots/events |
-| Dashboard | Two configurable signal plots, pause-view, display preferences, connection/recording health |
+| Dashboard | Two configurable signal plots, pause-view, display preferences, connection/recording health; residual and rolling bias keep equal-width signs (including rounded zero) to prevent sign-change jitter |
 | Radio | Coordinated dual-USB rate/channel/preamble/data-rate/TX-power changes, readback and rollback |
 | Experiments | Host-scheduled repeated timed runs and intervals; separate recordings and incomplete/interrupted outcomes |
 | Analysis | Five core residual statistics, histogram with a selectable distribution fit (Gaussian, GMM, shifted log-normal, Student-t, Laplace, skew-normal) and model comparison, Welch or gap-aware Lomb-Scargle spectrum pooled over all runs of the batch |
@@ -101,6 +101,10 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   Each successful SET is saved to STM32 flash sector 11 (0x080E0000) and restored at boot; the UI loads the boards' values on page load. A DFU reflash keeps the saved record. Other sources remain
   suggestion-only. Validate the updated pair on fresh LOS runs and other distances.
   Native/virtual-USB tests do not establish on-hardware ranging accuracy.
+- Optional TX-interval jitter (`jitter_ms`, Radio / sampling panel) randomises the sampling cadence
+  to break the narrowband, drifting-frequency noise seen at ≥20 Hz (suspected crystal-offset beat).
+  Firmware and host are implemented and unit-tested but **not yet hardware-verified**: flash both
+  boards, record at 40 Hz with jitter off and on, and compare the noise spectrum.
 - ESP32 accepts one unauthenticated TCP client on a trusted lab network. Keep
   credentials and local connection details in ignored configuration/notes.
 - The test environment currently emits an upstream Starlette/httpx deprecation

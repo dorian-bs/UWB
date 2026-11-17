@@ -8,19 +8,26 @@ const SERIES = [
   { key: "rx_power_dbm", family: "power", color: "#6cb4f0", dash: [] },
   { key: "fp_power_dbm", family: "power", color: "#f0b45a", dash: [] },
   { key: "fp_gap_db", family: "power", color: "#ff8a7a", dash: [] },
+  { key: "rate_hz", family: "rate", color: "#5ad18f", dash: [] },
+  { key: "requested_hz", family: "rate", color: "#b8c2bf", dash: [7, 4] },
 ];
+const FAMILIES = ["distance", "error", "power", "rate"];
+// Right-hand axes in drawing order; distance is always on the left.
+const RIGHT_AXES = [["error", "Error (m)"], ["power", "Power (dB)"], ["rate", "Rate (Hz)"]];
 const DEFAULTS = {
   count: 180, height: 300, style: "lines", secondary: false, controls: true,
   series: ["corrected_m", "expected_m", "residual_m"],
   distance: { auto: true, min: 0, max: 4 },
   error: { auto: true, min: -0.1, max: 0.1 },
   power: { auto: true, min: -100, max: -60 },
+  rate: { auto: true, min: 0, max: 20 },
   secondPlot: {
     count: 180, height: 300, style: "lines",
     series: ["residual_m"],
     distance: { auto: true, min: 0, max: 4 },
     error: { auto: true, min: -0.1, max: 0.1 },
-  power: { auto: true, min: -100, max: -60 },
+    power: { auto: true, min: -100, max: -60 },
+    rate: { auto: true, min: 0, max: 20 },
   },
 };
 const STORAGE_KEY = "uwb-lab-display-v1";
@@ -59,9 +66,9 @@ function validatePlotPreferences(value, label) {
   if (!value || !Array.isArray(value.series) || value.series.some((key) => !SERIES.some((s) => s.key === key))) {
     throw new Error(`${label}: invalid trace selection.`);
   }
-  // Preferences saved before the dB axis was adjustable have no power field.
-  if (value && value.power === undefined) value = { ...value, power: { ...DEFAULTS.power } };
-  for (const family of ["distance", "error", "power"]) {
+  // Preferences saved before the dB or rate axes existed lack those fields.
+  value = { ...value, power: value.power ?? { ...DEFAULTS.power }, rate: value.rate ?? { ...DEFAULTS.rate } };
+  for (const family of FAMILIES) {
     const axis = value[family];
     if (!axis || typeof axis.auto !== "boolean" || !Number.isFinite(axis.min) ||
         !Number.isFinite(axis.max) || axis.min >= axis.max || !Number.isFinite(axis.max - axis.min)) {
@@ -71,6 +78,7 @@ function validatePlotPreferences(value, label) {
   return {
     series: [...new Set(value.series)],
     distance: { ...value.distance }, error: { ...value.error }, power: { ...value.power },
+    rate: { ...value.rate },
   };
 }
 
@@ -88,11 +96,13 @@ function axisBounds(values, axis, includeZero = false) {
 function getPlotData(samples, settings) {
   const selected = SERIES.filter((s) => settings.series.includes(s.key));
   const bounds = {};
-  for (const family of ["distance", "error", "power"]) {
+  for (const family of FAMILIES) {
     bounds[family] = axisBounds(
       selected.filter((s) => s.family === family).flatMap((s) => samples.map((sample) => sample[s.key])),
       settings[family], family === "error",
     );
+    // A rate axis starts at zero so a dip reads as a dip.
+    if (family === "rate" && settings.rate.auto) bounds.rate[0] = 0;
   }
   return { selected, bounds };
 }
@@ -232,11 +242,22 @@ function resolveCalibrationStatusMessage({ statusNote = "", stickyNote = "", has
 // Selectable TX_POWER register values, nominally 3 dB apart (see TX_POWER_PRESETS in radio.py).
 const TX_POWER_PRESETS = [0xFEFEFEFE, 0x9E9E9E9E, 0x85858585, 0x4A4A4A4A, 0x3D3D3D3D, 0x48484848, 0x30303030];
 
+const MAX_JITTER_MS = 50, MIN_INTERVAL_MS = 10; // keep in step with radio.py
+
 function radioPayload(fields) {
   const payload = {};
   for (const key of ["sampling_hz", "channel", "preamble", "data_rate"]) {
     if (String(fields[key] ?? "").trim() === "") throw new Error("All radio settings are required.");
     payload[key] = Number(fields[key]);
+  }
+  // The checkbox is absent from FormData when unticked; the value box keeps its number either way.
+  payload.jitter_ms = 0;
+  if (fields.jitter_enabled) {
+    const jitter = String(fields.jitter_ms ?? "").trim();
+    payload.jitter_ms = /^\d+$/.test(jitter) ? Number(jitter) : NaN;
+    if (!(payload.jitter_ms >= 1 && payload.jitter_ms <= MAX_JITTER_MS)) {
+      throw new Error(`Jitter must be a whole number of 1-${MAX_JITTER_MS} ms.`);
+    }
   }
   const power = String(fields.tx_power ?? "").trim();
   payload.tx_power = /^0x[0-9a-f]{1,8}$/i.test(power) ? Number(power) : NaN;
@@ -245,6 +266,10 @@ function radioPayload(fields) {
       ![5, 9].includes(payload.channel) || ![64, 128, 256, 512, 1024].includes(payload.preamble) ||
       ![850, 6800].includes(payload.data_rate)) {
     throw new Error("Choose supported radio settings; requested rate must be 0.1-50 Hz.");
+  }
+  const period = Math.round(1000 / payload.sampling_hz);
+  if (payload.jitter_ms && period - payload.jitter_ms < MIN_INTERVAL_MS) {
+    throw new Error(`Jitter must leave at least ${MIN_INTERVAL_MS} ms between exchanges (at most ${Math.max(period - MIN_INTERVAL_MS, 0)} ms at this rate).`);
   }
   return payload;
 }
@@ -286,7 +311,7 @@ function hardwareCalibrationView(status, capture) {
 
 function startDashboard() {
   const byId = (id) => document.getElementById(id);
-  const format = (value) => formatAnalysisValue(value, "m");
+  const format = (value, signed = false) => formatAnalysisValue(value, "m", signed);
   const view = createViewState();
   let preferences = validatePreferences(DEFAULTS);
   let recording = false;
@@ -323,7 +348,7 @@ function startDashboard() {
       document.querySelectorAll(`#${prefix}series-controls input`).forEach((input) => {
         input.checked = settings.series.includes(input.value);
       });
-      for (const family of ["distance", "error", "power"]) {
+      for (const family of FAMILIES) {
         byId(`${prefix}${family}-auto`).checked = settings[family].auto;
         for (const bound of ["min", "max"]) {
           byId(`${prefix}${family}-${bound}`).value = settings[family][bound];
@@ -356,7 +381,7 @@ function startDashboard() {
       style: byId(`${prefix}plot-style`).value,
       series: [...document.querySelectorAll(`#${prefix}series-controls input:checked`)].map((input) => input.value),
     };
-    for (const family of ["distance", "error", "power"]) {
+    for (const family of FAMILIES) {
       const auto = byId(`${prefix}${family}-auto`).checked;
       candidate[family] = { auto };
       for (const bound of ["min", "max"]) {
@@ -451,11 +476,11 @@ function startDashboard() {
     ctx.scale(scale, scale);
     const width = box.width, height = box.height;
     const hasDistance = selected.some((s) => s.family === "distance");
-    const hasError = selected.some((s) => s.family === "error");
-    const hasPower = selected.some((s) => s.family === "power");
-    // The dB axis sits on the right, outside the error axis when both are shown.
-    const pad = { top: 25, right: hasError && hasPower ? 125 : 65, bottom: 30, left: 65 };
-    const powerAxisX = width - pad.right + (hasError ? 62 : 7);
+    const rightAxes = RIGHT_AXES.filter(([family]) => selected.some((s) => s.family === family));
+    // Right-hand axes sit side by side, each 60 px wide.
+    const pad = { top: 25, right: 65 + 60 * Math.max(rightAxes.length - 1, 0), bottom: 30, left: 65 };
+    const axisX = new Map(rightAxes.map(([family], index) => [family, width - pad.right + 7 + 62 * index]));
+    const hasError = axisX.has("error");
     const plotWidth = Math.max(1, width - pad.left - pad.right);
     const plotHeight = height - pad.top - pad.bottom;
     const x = (index) => pad.left + index * plotWidth / Math.max(samples.length - 1, 1);
@@ -467,28 +492,23 @@ function startDashboard() {
     ctx.fillStyle = theme.text;
     ctx.textAlign = "left";
     if (hasDistance) ctx.fillText("Distance (m)", 4, 14);
-    if (hasError) {
-      ctx.textAlign = "right";
-      ctx.fillText("Error (m)", hasPower ? width - pad.right + 55 : width - 4, 14);
-    }
-    if (hasPower) {
-      ctx.textAlign = "right";
-      ctx.fillText("Power (dB)", width - 4, 14);
-    }
+    ctx.textAlign = "right";
+    rightAxes.forEach(([family, title], index) => {
+      ctx.fillText(title, index === rightAxes.length - 1 ? width - 4 : axisX.get(family) + 48, 14);
+    });
     for (let index = 0; index <= 4; index++) {
       const row = pad.top + index * plotHeight / 4;
       ctx.strokeStyle = theme.grid;
       ctx.beginPath(); ctx.moveTo(pad.left, row); ctx.lineTo(width - pad.right, row); ctx.stroke();
-      for (const family of ["distance", "error", "power"]) {
-        if ((family === "distance" && !hasDistance) || (family === "error" && !hasError) ||
-            (family === "power" && !hasPower)) continue;
+      for (const family of FAMILIES) {
+        if (family === "distance" ? !hasDistance : !axisX.has(family)) continue;
         const [min, max] = bounds[family];
         const left = family === "distance";
         ctx.textAlign = left ? "right" : "left";
         ctx.fillStyle = theme.text;
-        const labelX = left ? pad.left - 7 : family === "power" ? powerAxisX : width - pad.right + 7;
+        const labelX = left ? pad.left - 7 : axisX.get(family);
         const value = max - (max - min) * index / 4;
-        ctx.fillText(family === "power" ? value.toFixed(1) : format(value), labelX, row + 4);
+        ctx.fillText(family === "power" || family === "rate" ? value.toFixed(1) : format(value), labelX, row + 4);
       }
     }
     ctx.save();
@@ -542,7 +562,7 @@ function startDashboard() {
       ["range-value", "corrected_m"], ["expected-value", "expected_m"], ["residual-value", "residual_m"],
       ["bias-value", "rolling_bias_m"], ["spread-value", "rolling_std_m"],
       ["rx-power-value", "rx_power_dbm"], ["fp-gap-value", "fp_gap_db"],
-    ]) byId(id).textContent = format(last[key]);
+    ]) byId(id).textContent = format(last[key], key === "residual_m" || key === "rolling_bias_m");
     drawChart(byId("distance-chart"), samples, preferences);
     if (preferences.secondary) drawChart(byId("residual-chart"), view.visible(preferences.secondPlot.count), preferences.secondPlot);
     byId("view-state").textContent = view.paused() ? "Paused view - acquisition continues" : "Live view";
@@ -649,6 +669,9 @@ function startDashboard() {
     const form = byId("radio-form");
     form.elements.namedItem("sampling_hz").value = (1000 / state.period_ms).toFixed(3);
     for (const key of ["channel", "preamble", "data_rate"]) form.elements.namedItem(key).value = state[key];
+    // Boards without jitter support report nothing; keep the box off and leave the last value for editing.
+    form.elements.namedItem("jitter_enabled").checked = state.jitter_ms > 0;
+    if (state.jitter_ms > 0) form.elements.namedItem("jitter_ms").value = state.jitter_ms;
     const power = form.elements.namedItem("tx_power");
     power.value = `0x${state.tx_power.toString(16).padStart(8, "0").toUpperCase()}`;
     // A board left on a value outside the presets (e.g. the firmware default) shows the empty placeholder.
@@ -664,15 +687,20 @@ function startDashboard() {
     byId("observed-rate").textContent = `${formatAnalysisValue(status.observed_hz, "Hz")} samples/s` +
       (Number.isFinite(status.requested_hz) ? ` of ${formatAnalysisValue(status.requested_hz, "Hz")} requested` : "") +
       (Number.isFinite(status.exchange_success_pct) ? `; ${status.exchange_success_pct.toFixed(0)}% of exchange attempts succeed` : "");
-    byId("yield-value").textContent = Number.isFinite(status.yield_pct) ? status.yield_pct.toFixed(0) : "--";
+    const observed = status.observed_hz;
+    byId("yield-value").textContent = Number.isFinite(observed) && Number.isFinite(status.requested_hz)
+      ? observed.toFixed(observed < 10 ? 2 : 1) : "--";
+    byId("yield-unit").textContent = Number.isFinite(status.requested_hz)
+      ? `/ ${formatAnalysisValue(status.requested_hz, "Hz")} Hz` : "Hz";
     if (!radio?.supported) {
       byId("radio-state").textContent = "Requires dual-serial mode and updated firmware on both USB-connected boards. Demo, replay and single-board sources are read-only.";
       return;
     }
     if (!radioInitialized && radio.boards.tx.state) {
       // The boards keep their last applied settings, so they win over the values stored in the page.
-      const radioValues = () => ["sampling_hz", "channel", "preamble", "data_rate", "tx_power"]
-        .map((name) => byId("radio-form").elements.namedItem(name).value).join("|");
+      const radioValues = () => ["sampling_hz", "channel", "preamble", "data_rate", "tx_power", "jitter_ms"]
+        .map((name) => byId("radio-form").elements.namedItem(name).value)
+        .concat(byId("radio-form").elements.namedItem("jitter_enabled").checked).join("|");
       const before = radioValues();
       loadRadioFields(radio.boards.tx.state);
       if (before !== radioValues()) {
@@ -683,7 +711,7 @@ function startDashboard() {
       const board = radio.boards[role], state = board.state;
       const lost = board.telemetry_dropped || 0;
       if (!board.connected || !state) return `${role.toUpperCase()}: ${board.error || "waiting for USB identification"}`;
-      return `${role.toUpperCase()} #${state.board}: ch ${state.channel} · ${state.preamble} sym · ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps · ${(1000 / state.period_ms).toFixed(1)} Hz · ant ${state.tx_ant_dly ?? "--"}/${state.rx_ant_dly ?? "--"} · ${state.running ? "running" : "PAUSED"}${lost ? ` · ${lost} lines lost` : ""}`;
+      return `${role.toUpperCase()} #${state.board}: ch ${state.channel} · ${state.preamble} sym · ${formatAnalysisValue(state.data_rate / 1000, "Mbps")} Mbps · ${(1000 / state.period_ms).toFixed(1)} Hz${state.jitter_ms > 0 ? ` ±${state.jitter_ms} ms` : ""} · ant ${state.tx_ant_dly ?? "--"}/${state.rx_ant_dly ?? "--"} · ${state.running ? "running" : "PAUSED"}${lost ? ` · ${lost} lines lost` : ""}`;
     });
     byId("radio-state").textContent = descriptions.join("\n");
     if (radio.last_error) showError("radio-error", radio.last_error);

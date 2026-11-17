@@ -69,8 +69,8 @@
           <dt title="RX power minus first-path power. Higher means a weaker direct path (multipath / NLOS).">RX - first-path gap</dt>
         </div>
         <div class="metric-tile">
-          <dd class="metric-value"><strong id="yield-value">--</strong><span class="metric-unit">%</span></dd>
-          <dt title="Observed valid samples per second as a share of the requested ranging rate (needs the radio panel: dual-serial mode). Exchange success is the share of recent attempts that gave a sample.">Sample yield</dt>
+          <dd class="metric-value"><strong id="yield-value">--</strong><span id="yield-unit" class="metric-unit">Hz</span></dd>
+          <dt title="Observed valid samples per second, compared with the requested ranging rate (needs the radio panel: dual-serial mode). The Samples/s and Requested rate plot traces show the same over time.">Samples per second</dt>
         </div>
       </dl>
 
@@ -103,6 +103,8 @@
           <label class="rxpower"><input type="checkbox" value="rx_power_dbm">RX power</label>
           <label class="fppower"><input type="checkbox" value="fp_power_dbm">First-path power</label>
           <label class="fpgap"><input type="checkbox" value="fp_gap_db">RX - first-path gap</label>
+          <label class="samplerate"><input type="checkbox" value="rate_hz">Samples/s</label>
+          <label class="requestedrate"><input type="checkbox" value="requested_hz">Requested rate</label>
         </fieldset>
         <details class="axis-settings">
           <summary>Plot 1 settings</summary>
@@ -126,6 +128,11 @@
               <label class="check"><input id="power-auto" type="checkbox" checked>Auto scale</label>
               <label>Minimum<input id="power-min" type="number" step="any" value="-100" disabled></label>
               <label>Maximum<input id="power-max" type="number" step="any" value="-60" disabled></label>
+            </fieldset>
+            <fieldset><legend>Rate axis (Hz)</legend>
+              <label class="check"><input id="rate-auto" type="checkbox" checked>Auto scale (from zero)</label>
+              <label>Minimum<input id="rate-min" type="number" step="any" value="0" disabled></label>
+              <label>Maximum<input id="rate-max" type="number" step="any" value="20" disabled></label>
             </fieldset>
           </div>
         </details>
@@ -151,6 +158,8 @@
             <label class="rxpower"><input type="checkbox" value="rx_power_dbm">RX power</label>
             <label class="fppower"><input type="checkbox" value="fp_power_dbm">First-path power</label>
             <label class="fpgap"><input type="checkbox" value="fp_gap_db">RX - first-path gap</label>
+          <label class="samplerate"><input type="checkbox" value="rate_hz">Samples/s</label>
+          <label class="requestedrate"><input type="checkbox" value="requested_hz">Requested rate</label>
           </fieldset>
           <details class="axis-settings">
             <summary>Plot 2 settings</summary>
@@ -174,6 +183,11 @@
                 <label class="check"><input id="second-power-auto" type="checkbox" checked>Auto scale</label>
                 <label>Minimum<input id="second-power-min" type="number" step="any" value="-100" disabled></label>
                 <label>Maximum<input id="second-power-max" type="number" step="any" value="-60" disabled></label>
+              </fieldset>
+              <fieldset><legend>Rate axis (Hz)</legend>
+                <label class="check"><input id="second-rate-auto" type="checkbox" checked>Auto scale (from zero)</label>
+                <label>Minimum<input id="second-rate-min" type="number" step="any" value="0" disabled></label>
+                <label>Maximum<input id="second-rate-max" type="number" step="any" value="20" disabled></label>
               </fieldset>
             </div>
           </details>
@@ -224,6 +238,10 @@
           <fieldset id="radio-fields" disabled>
             <label>Requested ranging rate (Hz)
               <input name="sampling_hz" type="number" min="0.1" max="50" step="any" required>
+            </label>
+            <label class="check"><input name="jitter_enabled" type="checkbox">Random sample timing (jitter)<button type="button" class="info" data-tip="Adds a random offset of up to plus or minus the value below to every exchange interval, so the mean rate is unchanged. It stops a fixed sampling cadence from aliasing a periodic ranging error into a slow tone. Needs updated firmware on both boards. The offset is not recorded per sample; the host time and sequence still give the real spacing." aria-label="Adds a random offset to every exchange interval so a fixed sampling cadence cannot alias a periodic ranging error into a slow tone.">i</button></label>
+            <label>Jitter, plus or minus (ms)
+              <input name="jitter_ms" type="number" min="1" max="50" step="1" value="2">
             </label>
             <label>Channel<select name="channel"><option value="5">5</option><option value="9">9</option></select></label>
             <label>Preamble (symbols)<select name="preamble">

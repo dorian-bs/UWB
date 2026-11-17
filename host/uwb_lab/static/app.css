@@ -49,6 +49,8 @@ dd { margin: 0; font: 600 13px var(--mono); }
 .rxpower { color: #2a6fb0; }
 .fppower { color: #a0610a; }
 .fpgap { color: #c0392b; }
+.samplerate { color: #0a8f5a; }
+.requestedrate { color: #6b7a76; }
 
 /* ---------- 2. Layout ---------- */
 .topbar { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -315,6 +317,8 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .rxpower { color: #6cb4f0; }
 .fppower { color: #f0b45a; }
 .fpgap { color: #ff8a7a; }
+.samplerate { color: #5ad18f; }
+.requestedrate { color: #b8c2bf; }
 input, select, button { border-color: #3d4b47; }
 input:disabled { background: #1a2220; color: #7d8985; }
 input:not([type="checkbox"]), select { background: #121a17; border-width: 0 0 1px; border-radius: 0; border-color: #3d4b47; }

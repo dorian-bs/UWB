@@ -83,6 +83,10 @@ The **Radio / sampling** panel offers:
   ≥97% yield down to 20 ms; 15 ms gives 96% and 10 ms only 85%, so 50 Hz is the cap. The ESP32
   UART/TCP link (115200 baud, ~35 ms per record) is only complete up to about 20 Hz; above that
   the firmware skips lines for the UART and only USB (`dual-serial`) carries every sample.
+- Random sample timing (jitter): tick the box and set ± ms to add a uniform random offset to every
+  exchange interval (mean rate unchanged; at least 10 ms must remain between exchanges, so at most
+  period − 10 ms, capped at 50 ms). Use it when high-rate noise looks like a drifting sine: it turns
+  an aliased periodic error into ordinary white noise. Needs the updated firmware on both boards.
 - Channel: 5 or 9; preamble: 64, 128, 256, 512, or 1024 symbols.
 - Data rate: 850 kbps or 6.8 Mbps.
 - TX power: one of seven preset `TX_POWER` register values, nominally 3 dB apart from the maximum down to -18 dB. They are relative steps, **not calibrated dBm** and not a lab-approved power range.
@@ -90,8 +94,12 @@ The **Radio / sampling** panel offers:
 These are physical radio settings. Demo, replay, TCP, and single-USB modes cannot
 apply them. The 50 Hz guard is the highest rate measured with ≥97% yield, not a certified throughput claim; requested rate and
 observed successful-sample rate are shown separately.
-The **Sample yield** tile is the observed rate as a percentage of the rate the TX board is configured for;
-the radio panel also shows the share of recent ranging attempts (from the firmware exchange counter) that produced a sample.
+The **Samples per second** tile shows the observed rate next to the rate the TX board is configured for (for example `9.98 / 10 Hz`).
+The **Samples/s** and **Requested rate** plot traces (rate axis, from zero) draw the same over time: Samples/s is measured over the
+last 10 arrivals, so it reacts within a second or two. Both are plot-only values the host adds when streaming samples; recordings keep the raw records.
+The host restarts the rate windows whenever the channel, preamble, data rate or period changes, because the pause while the boards apply
+the new setting would otherwise depress the reading for up to 100 samples.
+The radio panel also shows the share of recent ranging attempts (from the firmware exchange counter) that produced a sample.
 See the [parameter reference](../docs/EXPERIMENTS_AND_VALIDATION.md#radio-and-sampling-parameter-reference)
 for physical meaning and comparison advice.
 

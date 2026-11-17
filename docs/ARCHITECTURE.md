@@ -155,6 +155,7 @@ UWB <id> GET
 UWB <id> PAUSE
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power>
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power> <tx_ant_dly> <rx_ant_dly>
+UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power> <tx_ant_dly> <rx_ant_dly> <jitter_ms>
 UWB <id> RESUME
 UWB <id> DIAG <flags 0-15|OFF>
 ```
@@ -188,6 +189,15 @@ The extended `SET` includes absolute unsigned 16-bit TX/RX antenna-delay registe
 (0-65535 DTU); legacy `SET` preserves their current values. GET/ACK adds
 `tx_ant_dly` and `rx_ant_dly` read from the DW3000, without changing protocol v1.
 Missing delay fields identify older firmware and disable calibration apply only.
+`jitter_ms` (0-50, default 0, `jitter_ms + 10 <= period_ms`) makes the TX board wait
+`period_ms` plus a uniform random integer in -jitter_ms..+jitter_ms before each poll, so the mean
+rate is unchanged and the cadence is no longer fixed. It exists because a fixed cadence aliases
+periodic ranging errors (for example the beat between the two crystals) into a slow tone at
+higher rates. The 11-word and shorter `SET` forms keep the current value; GET/ACK reports
+`jitter_ms`, and its absence identifies older firmware. The host refuses a nonzero jitter then.
+The per-sample real spacing is not logged; use the host arrival time or the sequence counter.
+The setting is saved with the radio settings (record magic `UWB2`; records from older firmware,
+`UWB1`, still load with jitter off).
 Radio reconfiguration preserves the current delays; each successful SET is saved to flash sector 11
 (0x080E0000, magic + checksum) and re-applied at boot; an invalid record falls back to
 compile-time defaults. The UI imports the boards' values on page load.

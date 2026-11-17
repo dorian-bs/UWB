@@ -10,7 +10,7 @@ from contextlib import suppress
 from typing import Any, Literal, Protocol, TypeVar
 
 import serial
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .core import SessionRecorder, utc_now
 
@@ -41,6 +41,10 @@ async def _settle(task: asyncio.Task[T]) -> tuple[T, bool]:
 TX_POWER_PRESETS = tuple(int(f"{byte:02X}" * 4, 16) for byte in (0xFE, 0x9E, 0x85, 0x4A, 0x3D, 0x48, 0x30))
 
 
+MAX_JITTER_MS = 50
+MIN_INTERVAL_MS = 10  # shortest period the firmware accepts, and about twice one exchange
+
+
 class RadioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -49,6 +53,8 @@ class RadioConfig(BaseModel):
     preamble: Literal[64, 128, 256, 512, 1024]
     data_rate: Literal[850, 6800]
     tx_power: int = Field(ge=0, le=0xFFFFFFFF, strict=True)
+    # Random +/- offset on every exchange interval; 0 turns it off. See qorvo_control.h.
+    jitter_ms: int = Field(default=0, ge=0, le=MAX_JITTER_MS, strict=True)
 
     @field_validator("tx_power")
     @classmethod
@@ -63,6 +69,15 @@ class RadioConfig(BaseModel):
         if type(value) is not int:
             raise ValueError("Radio selections must be integers")
         return value
+
+    @model_validator(mode="after")
+    def jitter_keeps_intervals_positive(self) -> RadioConfig:
+        if self.jitter_ms and self.period_ms - self.jitter_ms < MIN_INTERVAL_MS:
+            raise ValueError(
+                f"Jitter must leave at least {MIN_INTERVAL_MS} ms between exchanges "
+                f"(at most {max(self.period_ms - MIN_INTERVAL_MS, 0)} ms at this rate)"
+            )
+        return self
 
     @property
     def period_ms(self) -> int:
@@ -86,6 +101,7 @@ class BoardState(BaseModel):
     running: bool
     tx_ant_dly: int | None = Field(default=None, ge=0, le=65535)
     rx_ant_dly: int | None = Field(default=None, ge=0, le=65535)
+    jitter_ms: int | None = Field(default=None, ge=0, le=MAX_JITTER_MS)
 
 
 class ControlReply(BoardState):
@@ -281,14 +297,17 @@ class SerialBoard:
 
 DEVICE_FIELDS = ("period_ms", "channel", "preamble", "data_rate", "tx_power")
 DELAY_FIELDS = ("tx_ant_dly", "rx_ant_dly")
+JITTER_FIELDS = ("jitter_ms",)
 
 
 def state_fields(state: dict[str, Any]) -> tuple[str, ...]:
-    return (
-        DEVICE_FIELDS + DELAY_FIELDS
-        if all(state.get(key) is not None for key in DELAY_FIELDS)
-        else DEVICE_FIELDS
-    )
+    fields = DEVICE_FIELDS
+    if all(state.get(key) is not None for key in DELAY_FIELDS):
+        fields += DELAY_FIELDS
+        # The jitter word follows the delays on the wire, so it needs them too.
+        if all(state.get(key) is not None for key in JITTER_FIELDS):
+            fields += JITTER_FIELDS
+    return fields
 
 
 class RadioControl:
@@ -441,6 +460,10 @@ class RadioControl:
                     target = dict(state)
                     if config is not None:
                         target.update(zip(DEVICE_FIELDS, config.device_values(), strict=True))
+                        if target.get("jitter_ms") is not None:
+                            target["jitter_ms"] = config.jitter_ms
+                        elif config.jitter_ms:
+                            raise ControlError("Sample jitter requires updated firmware on both boards")
                     else:
                         for key in DELAY_FIELDS:
                             if state.get(key) is None:
@@ -496,6 +519,13 @@ class SampleRate:
 
     def add(self, timestamp: float | None = None) -> None:
         self.times.append(time.monotonic() if timestamp is None else timestamp)
+
+    def recent(self, count: int = 10) -> float | None:
+        """Rate over the last `count` arrivals, for a per-sample trace that follows changes quickly."""
+        stamps = list(self.times)[-count:]
+        if len(stamps) < 2 or stamps[-1] <= stamps[0]:
+            return None
+        return (len(stamps) - 1) / (stamps[-1] - stamps[0])
 
     def value(self, now: float | None = None) -> float | None:
         now = time.monotonic() if now is None else now
