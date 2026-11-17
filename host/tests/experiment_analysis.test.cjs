@@ -7,6 +7,7 @@ const {
   resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue, analysisCardSummary,
   analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, overlaySeries, colorWithAlpha,
   comparisonDeltaClass, comparisonMetricTiles, comparisonLegendLabels,
+  plotBounds, logTicks, heatColor, drawAnalysisChart,
 } = require("../uwb_lab/static/analysis.js");
 
 test("experiment inputs preserve duration, integer repetitions and interval", () => {
@@ -193,7 +194,7 @@ test("spectrum summary distinguishes Welch density from timestamp-aware Lomb-Sca
     {key: "resolution_hz", value: 0.018857, unit: "Hz"},
   ]);
   assert.equal(lomb.estimator, "Lomb-Scargle");
-  assert.deepEqual(lomb.metrics.map((metric) => metric.key), ["missing_samples", "resolution_hz"]);
+  assert.deepEqual(lomb.metrics.map((metric) => metric.key), ["resolution_hz"]);
   const unavailable = analysisCardSummary("psd", []);
   assert.equal(unavailable.estimator, null);
   assert.deepEqual(unavailable.metrics, []);
@@ -428,4 +429,78 @@ test("pooled cumulative analysis keeps existing cards visible throughout run and
   assert.ok(card.children.some((child) => /Not enough new samples.*previous result/i.test(child.textContent)));
   getElement("analysis-dataset").listeners.change();
   assert.equal(getElement("analysis-cards").children[0], card);
+});
+
+test("log spectrum axes skip non-positive values, add no zero baseline and tick on decades", () => {
+  const plot = {
+    x_scale: "log", y_scale: "log",
+    series: [{x: [0, 0.1, 10], y: [0, 1e-8, 1e-6]}, {x: [1, 2], y: [1e-7, 1e-7], y2: [1e-6, 1e-5]}],
+  };
+  const bounds = plotBounds(plot);
+  assert.ok(bounds.x.min < -0.9 && bounds.x.min > -1.1, "x starts at the first positive frequency (0.1 Hz)");
+  assert.ok(bounds.y.min > -8.2 && bounds.y.max < -4.8, "y spans 1e-8..1e-5 with no zero baseline");
+  assert.deepEqual(logTicks(-1, 2, 3).map((tick) => Number(tick.toFixed(2))), [-1, -0.7, -0.3, 0, 0.3, 0.7, 1, 1.3, 1.7, 2]);
+  assert.deepEqual(logTicks(-8, -3, 3), [-8, -7, -6, -5, -4, -3]);
+  assert.throws(() => plotBounds({series: [{x: [1, 2], y: [1, 2], y2: [1]}]}));
+});
+
+test("legends hide per-run and mirror curves and the heat ramp is monotonic in brightness", () => {
+  assert.deepEqual(analysisLegendLabels([
+    {label: "Pooled Welch PSD"}, {label: "95% confidence"}, {label: "Run #1", legend: false}, {label: "Noise floor (median)"},
+  ]), ["Pooled Welch PSD", "95% confidence", "Noise floor (median)"]);
+  assert.deepEqual(analysisLegendLabels([{label: "Only"}, {label: "Hidden", legend: false}]), []);
+  const luminance = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  assert.ok(luminance(heatColor(0)) < luminance(heatColor(0.5)) && luminance(heatColor(0.5)) < luminance(heatColor(1)));
+  assert.deepEqual(heatColor(-4), heatColor(0));
+  assert.deepEqual(heatColor(Number.NaN), heatColor(0));
+});
+
+test("spectrum, spectrogram and correlation plots render with hover readouts", () => {
+  const calls = [];
+  const context = new Proxy({}, {
+    get: (_, name) => name === "measureText" ? () => ({width: 40}) : name === "createImageData"
+      ? (w, h) => ({data: new Uint8ClampedArray(w * h * 4)}) : (...args) => calls.push([name, ...args]),
+    set: () => true,
+  });
+  const listeners = {};
+  const fakeCanvas = (width, height) => ({
+    clientWidth: width, clientHeight: height, getContext: () => context,
+    addEventListener: (type, handler) => { listeners[type] = handler; },
+    getBoundingClientRect: () => ({left: 0, top: 0}),
+  });
+  const previous = {document: global.document, window: global.window};
+  global.window = {devicePixelRatio: 1};
+  global.document = {documentElement: {dataset: {}}, createElement: () => ({...fakeCanvas(1, 1), width: 0, height: 0})};
+  try {
+    const frequencies = Array.from({length: 128}, (_, index) => (index + 1) * 0.12);
+    const spectrum = {
+      x_label: "Frequency (Hz)", y_label: "PSD (m^2/Hz)", x_scale: "log", y_scale: "log",
+      annotations: [{x: 7.5, y: 1e-6, text: "7.50 Hz +20 dB"}],
+      series: [
+        {label: "Pooled", x: [0, ...frequencies], y: [0, ...frequencies.map(() => 1e-7)], color: "#4fb3d1", alpha: null},
+        {label: "95%", x: frequencies, y: frequencies.map(() => 8e-8), y2: frequencies.map(() => 1.2e-7), style: "band", alpha: 0.2},
+        {label: "Floor", x: [0.12, 15], y: [1e-7, 1e-7], dashed: true},
+      ],
+    };
+    const heatmap = {
+      x: [1, 2, 3], y: [1, 2], z: [[0, 5, 10], [-3, 0, 12]], z_min: -3, z_max: 12, z_label: "dB", markers: [2.5],
+    };
+    const canvas = fakeCanvas(500, 220);
+    drawAnalysisChart(canvas, spectrum);
+    assert.ok(calls.some(([name]) => name === "fill"), "confidence band is filled");
+    listeners.mousemove({clientX: 200, clientY: 50});
+    assert.ok(calls.some(([name, text]) => name === "fillText" && /Pooled/.test(text)), "hover lists the series values");
+    listeners.mouseleave();
+    const tall = fakeCanvas(500, 280);
+    drawAnalysisChart(tall, {x_label: "Recorded time (s)", y_label: "Frequency (Hz)", series: [], heatmap});
+    listeners.mousemove({clientX: 150, clientY: 100});
+    assert.ok(calls.some(([name]) => name === "drawImage"), "heatmap is drawn from a cached image");
+    assert.ok(calls.some(([name, text]) => name === "fillText" && /dB/.test(text)), "colour bar and hover show dB");
+    drawAnalysisChart(fakeCanvas(500, 220), {
+      x_label: "Lag (samples)", y_label: "Autocorrelation",
+      series: [{label: "ACF", x: [1, 2, 3], y: [0.04, -0.3, 0.01], style: "stems"}],
+    });
+  } finally {
+    global.document = previous.document; global.window = previous.window;
+  }
 });

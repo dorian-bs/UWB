@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -88,12 +89,43 @@ class Series(ResultModel):
     label: str
     x: list[float]
     y: list[float]
-    style: Literal["line", "bars", "stems", "points"] = "line"
+    style: Literal["line", "bars", "stems", "points", "band"] = "line"
+    # "band" fills between y and y2; colour, opacity and legend visibility are presentation hints.
+    y2: list[float] | None = None
+    color: str | None = None
+    alpha: float | None = None
+    dashed: bool = False
+    width: float | None = None
+    legend: bool = True
 
     @model_validator(mode="after")
     def check_lengths(self) -> Series:
-        if len(self.x) != len(self.y):
+        if len(self.x) != len(self.y) or (self.y2 is not None and len(self.y2) != len(self.y)):
             raise ValueError("Series coordinates must have equal lengths")
+        return self
+
+
+class Annotation(ResultModel):
+    x: float
+    y: float
+    text: str
+
+
+class Heatmap(ResultModel):
+    """z[row][column] sampled at (x[column], y[row]); markers are x positions of run boundaries."""
+
+    x: list[float]
+    y: list[float]
+    z: list[list[float]]
+    z_label: str
+    z_min: float
+    z_max: float
+    markers: list[float] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_shape(self) -> Heatmap:
+        if len(self.z) != len(self.y) or any(len(row) != len(self.x) for row in self.z):
+            raise ValueError("Heatmap values must be rows x columns")
         return self
 
 
@@ -101,6 +133,11 @@ class Plot(ResultModel):
     x_label: str
     y_label: str
     series: list[Series]
+    title: str = ""
+    x_scale: Literal["linear", "log"] = "linear"
+    y_scale: Literal["linear", "log"] = "linear"
+    annotations: list[Annotation] = Field(default_factory=list)
+    heatmap: Heatmap | None = None
 
 
 class Table(ResultModel):
@@ -379,6 +416,15 @@ def distribution_fit(
     )
 
 
+SPECTRUM_SEGMENT = 256
+SPECTRUM_MIN_SAMPLES = 32
+# A window whose strongest line is 12 dB above its own median is far outside what white noise produces.
+NARROWBAND_RATIO = 16.0
+MAX_RUN_LINES = 12
+MAX_SPECTROGRAM_COLUMNS = 240
+ACF_LAGS = 20
+
+
 def power_spectrum(
     values: NDArray[np.float64], time_ms: NDArray[np.int64], seq: NDArray[np.int64]
 ) -> AnalysisResult:
@@ -386,17 +432,136 @@ def power_spectrum(
 
 
 def pooled_power_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
-    usable = [run for run in runs if len(run[1]) >= 32]
-    if not usable:
-        return AnalysisResult(status="unavailable", reason="PSD needs at least 32 eligible samples per run")
-    result = _pooled_spectrum(usable)
-    if result.status == "ok" and len(usable) < len(runs):
-        short = ", ".join(run_id for run_id, values, _, _ in runs if len(values) < 32)
-        result.warnings.insert(0, f"Skipped runs with fewer than 32 eligible samples: {short}")
+    eligible = [run for run in runs if len(run[1]) >= SPECTRUM_MIN_SAMPLES]
+    if not eligible:
+        return AnalysisResult(
+            status="unavailable", reason=f"PSD needs at least {SPECTRUM_MIN_SAMPLES} eligible samples per run"
+        )
+    # The window length follows the longest run only. A run that is still recording therefore cannot
+    # change the frequency grid; it joins the estimate once it holds one full window.
+    longest = max(len(run[1]) for run in eligible)
+    segment = min(SPECTRUM_SEGMENT, max(SPECTRUM_MIN_SAMPLES, longest // 2))
+    usable = [run for run in eligible if len(run[1]) >= segment]
+    result = _pooled_spectrum(usable, segment)
+    if result.status == "ok":
+        kept = {run[0] for run in usable}
+        left_out = [run[0] for run in runs if run[0] not in kept]
+        if left_out:
+            result.warnings.insert(
+                0,
+                f"Left out runs with fewer than {segment} eligible samples (shorter than one window): "
+                + ", ".join(left_out),
+            )
     return result
 
 
-def _pooled_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
+def _regular_windows(values: NDArray[np.float64], fs: float, segment: int):
+    frequencies, centers, power = signal.spectrogram(
+        values,
+        fs=fs,
+        window="hann",
+        nperseg=segment,
+        noverlap=segment // 2,
+        detrend="constant",
+        scaling="density",
+        mode="psd",
+    )
+    return frequencies, centers, power.T
+
+
+def _gapped_windows(values: NDArray[np.float64], times: NDArray[np.int64], fs: float, segment: int):
+    """Hann-tapered Lomb-Scargle windows on actual timestamps, scaled like a one-sided PSD density."""
+    seconds = (times - times[0]).astype(np.float64) / 1000
+    width = segment / fs
+    frequencies = np.arange(segment // 2 + 1) * fs / segment
+    angular = 2 * np.pi * frequencies[1:]
+    rows: list[NDArray[np.float64]] = []
+    centers: list[float] = []
+    start = 0.0
+    while start + width <= seconds[-1] + 1e-9:
+        low, high = np.searchsorted(seconds, [start, start + width], side="left")
+        count = high - low
+        if count >= 0.6 * segment:
+            offsets = seconds[low:high] - start
+            taper = 0.5 * (1 - np.cos(2 * np.pi * offsets / width))
+            tapered = (values[low:high] - np.mean(values[low:high])) * taper
+            with np.errstate(divide="ignore", invalid="ignore"):
+                power = signal.lombscargle(offsets, tapered, angular, normalize=False)
+            density = np.nan_to_num(2 * power * count / (fs * np.sum(taper**2)), nan=0.0, posinf=0.0)
+            rows.append(np.concatenate(([0.0], density)))
+            centers.append(start + width / 2)
+        start += width / 2
+    if not rows:
+        return frequencies, np.empty(0), np.empty((0, len(frequencies)))
+    return frequencies, np.array(centers), np.array(rows)
+
+
+def _autocorrelation(
+    series: list[tuple[NDArray[np.float64], NDArray[np.int64]]], max_lag: int
+) -> tuple[list[float | None], float]:
+    """Sample autocorrelation using only pairs exactly `lag` sequence numbers apart, so gaps never bias it."""
+    numerator = np.zeros(max_lag + 1)
+    pairs = np.zeros(max_lag + 1)
+    energy, count = 0.0, 0
+    for values, seq in series:
+        centered = values - np.mean(values)
+        energy += float(centered @ centered)
+        count += len(centered)
+        for lag in range(1, max_lag + 1):
+            index = np.searchsorted(seq, seq + lag)
+            safe = np.minimum(index, len(seq) - 1)
+            found = (index < len(seq)) & (seq[safe] == seq + lag)
+            numerator[lag] += float(np.sum(centered[found] * centered[safe[found]]))
+            pairs[lag] += int(found.sum())
+    variance = energy / count if count else 0.0
+    rho = [
+        float(numerator[lag] / pairs[lag] / variance) if pairs[lag] >= 10 and variance > 0 else None
+        for lag in range(1, max_lag + 1)
+    ]
+    return rho, 1.96 / math.sqrt(count) if count else math.nan
+
+
+def _run_label(run_id: str) -> str:
+    match = re.search(r"(?:^|-)run-(\d+)$", run_id)
+    return f"#{int(match.group(1))}" if match else run_id
+
+
+def _spectrogram_heatmap(
+    windows: list[tuple[NDArray[np.float64], NDArray[np.float64], float]], frequencies: NDArray[np.float64]
+) -> Heatmap | None:
+    """Window spectra from every run laid end to end in time, in dB over the global median level."""
+    columns = [rows for _, rows, _ in windows if len(rows)]
+    if sum(len(rows) for rows in columns) < 2:
+        return None
+    power = np.vstack(columns)[:, 1:]
+    level = float(np.median(power))
+    if level <= 0:
+        return None
+    times: list[float] = []
+    markers: list[float] = []
+    offset = 0.0
+    for centers, rows, duration in windows:
+        if offset and len(rows):
+            markers.append(offset)
+        times.extend((centers + offset).tolist())
+        offset += duration
+    group = math.ceil(len(power) / MAX_SPECTROGRAM_COLUMNS)
+    merged = [power[start : start + group].mean(axis=0) for start in range(0, len(power), group)]
+    merged_times = [float(np.mean(times[start : start + group])) for start in range(0, len(times), group)]
+    decibels = 10 * np.log10(np.maximum(np.array(merged), level * 1e-6) / level)
+    low, high = np.percentile(decibels, [1, 99.7])
+    return Heatmap(
+        x=merged_times,
+        y=frequencies[1:].tolist(),
+        z=np.round(decibels.T, 1).tolist(),
+        z_label="dB over median level",
+        z_min=float(low),
+        z_max=float(max(high, low + 3)),
+        markers=markers,
+    )
+
+
+def _pooled_spectrum(runs: list[SpectrumRun], segment: int) -> AnalysisResult:
     deltas = []
     regular = True
     for run_id, _values, time_ms, seq in runs:
@@ -414,97 +579,221 @@ def _pooled_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
         deltas.append(delta)
     all_deltas = np.concatenate(deltas)
     period = float(np.median(all_deltas))
-    if not regular or np.any(np.abs(all_deltas - period) > 0.05 * period):
-        return _lomb_scargle_spectrum(runs)
+    if np.any(np.abs(all_deltas - period) > 0.05 * period):
+        regular = False
     fs = 1000 / period
-    segment = min(256, *(len(values) for _, values, _, _ in runs))
-    count = sum(len(values) for _, values, _, _ in runs)
-    density = np.zeros(segment // 2 + 1)
-    for _, values, _, _ in runs:
-        frequencies, run_density = signal.welch(
-            values,
-            fs=fs,
-            window="hann",
-            nperseg=segment,
-            noverlap=segment // 2,
-            detrend="constant",
-            scaling="density",
+    frequencies = np.arange(segment // 2 + 1) * fs / segment
+
+    spectra = []
+    for run_id, values, times, seq in runs:
+        if regular:
+            _, centers, rows = _regular_windows(values, fs, segment)
+        else:
+            _, centers, rows = _gapped_windows(values, times, fs, segment)
+        if len(rows):
+            spectra.append((run_id, values, times, seq, centers, rows))
+    if not spectra:
+        return AnalysisResult(
+            status="unavailable", reason="Selected runs hold no complete window with enough samples"
         )
-        density += run_density * (len(values) / count)
-    return AnalysisResult(
-        warnings=[
-            "Sample-weighted Welch spectra from all selected run samples; "
-            "segments never cross run boundaries. "
-            "Each segment is demeaned; intervals are not compressed into a continuous signal."
-        ],
-        metrics=[
-            Metric(key="count", label="Eligible samples", value=count),
-            Metric(key="runs", label="Runs", value=len(runs)),
-            Metric(key="fs_hz", label="Device-timed sample rate", value=fs, unit="Hz"),
-            Metric(key="segment", label="Welch segment", value=segment, unit="samples"),
-            Metric(key="resolution_hz", label="Frequency resolution", value=fs / segment, unit="Hz"),
-        ],
-        plots=[
-            Plot(
-                x_label="Frequency (Hz)",
-                y_label="PSD (m^2/Hz)",
-                series=[Series(label="Pooled Welch PSD", x=frequencies.tolist(), y=density.tolist())],
-            )
-        ],
+    count = sum(len(values) for _, values, *_ in spectra)
+    window_count = sum(len(rows) for *_, rows in spectra)
+    run_density = [rows.mean(axis=0) for *_, rows in spectra]
+    density = sum(
+        mean * (len(values) / count) for mean, (_, values, *_rest) in zip(run_density, spectra, strict=True)
+    )
+    body = density[1:]
+    total = float(np.sum(body))
+    floor = float(np.median(body))
+    peak = 1 + int(np.argmax(body))
+    peak_hz = float(frequencies[peak])
+    peak_db = 10 * math.log10(density[peak] / floor) if floor > 0 else None
+    tonal = float(np.sum(density[max(1, peak - 2) : peak + 3]) / total * 100) if total > 0 else None
+    flatness = float(np.exp(np.mean(np.log(body))) / np.mean(body)) if np.all(body > 0) else None
+
+    every_window = np.vstack([rows for *_, rows in spectra])[:, 1:]
+    medians = np.median(every_window, axis=1)
+    strongest = np.max(every_window, axis=1)
+    tonal_windows = (medians > 0) & (strongest > NARROWBAND_RATIO * medians)
+    narrowband = float(np.mean(tonal_windows) * 100)
+    wander = (
+        float(np.std(frequencies[1 + np.argmax(every_window[tonal_windows], axis=1)]))
+        if np.sum(tonal_windows) >= 3
+        else None
     )
 
+    max_lag = min(ACF_LAGS, count // 4)
+    rho, limit = _autocorrelation([(values, seq) for _, values, _, seq, *_ in spectra], max_lag)
+    lag_one = rho[0] if rho else None
+    lag_two = rho[1] if len(rho) > 1 else None
 
-def _lomb_scargle_spectrum(runs: list[SpectrumRun]) -> AnalysisResult:
-    spans = [float(times[-1] - times[0]) / 1000 for _, _, times, _ in runs]
-    sample_rates = [1000 / float(np.median(np.diff(times))) for _, _, times, _ in runs]
-    minimum_hz = 1 / min(spans)
-    maximum_hz = min(sample_rates) / 2
-    if minimum_hz >= maximum_hz:
-        return AnalysisResult(
-            status="unavailable", reason="Selected runs have no common resolvable frequency band"
-        )
-    points = min(4096, max(256, math.ceil(5 * min(spans) * (maximum_hz - minimum_hz))))
-    frequencies = np.linspace(minimum_hz, maximum_hz, points, endpoint=False)
-    angular = 2 * np.pi * frequencies
-    count = sum(len(values) for _, values, _, _ in runs)
-    power = np.zeros(points)
-    for _, values, times, _ in runs:
-        centered = values - np.mean(values)
-        seconds = (times - times[0]).astype(np.float64) / 1000
-        # 2/N converts unnormalized Lomb-Scargle power to explained mean-square units.
-        for start in range(0, points, 128):
-            stop = start + 128
-            power[start:stop] += (
-                2 * signal.lombscargle(seconds, centered, angular[start:stop], normalize=False) / count
+    dof = 1.89 * window_count  # 50% overlapped Hann windows are slightly correlated
+    low_band = density[1:] * dof / stats.chi2.ppf(0.975, dof)
+    high_band = density[1:] * dof / stats.chi2.ppf(0.025, dof)
+    estimator = "Pooled Welch PSD" if regular else "Pooled Lomb-Scargle spectrum"
+    series = [
+        Series(label=estimator, x=frequencies.tolist(), y=density.tolist(), color="#4fb3d1", width=2.4),
+        Series(
+            label="95% confidence",
+            x=frequencies[1:].tolist(),
+            y=low_band.tolist(),
+            y2=high_band.tolist(),
+            style="band",
+            color="#4fb3d1",
+            alpha=0.3,
+        ),
+    ]
+    if 2 <= len(spectra) <= MAX_RUN_LINES:
+        for (run_id, *_), mean in zip(spectra, run_density, strict=True):
+            series.append(
+                Series(
+                    label=f"Run {_run_label(run_id)}",
+                    x=frequencies[1:].tolist(),
+                    y=mean[1:].tolist(),
+                    color="#8a9893",
+                    alpha=0.3,
+                    width=1,
+                    legend=False,
+                )
             )
-    missing = sum(int(np.sum(np.diff(seq) - 1)) for _, _, _, seq in runs)
-    return AnalysisResult(
-        warnings=[
-            "Gapped or irregular timing: using Lomb-Scargle on every eligible sample's "
-            "actual device timestamp. "
-            "No interpolation, gap compression or concatenation across runs.",
-            "Sample-weighted, mean-subtracted power (2/N scaling, m^2), not a PSD density (m^2/Hz); "
-            "do not compare its vertical scale directly with Welch PSD. Frequency grid excludes DC and "
-            "ends below the slowest run's median-cadence Nyquist estimate.",
-        ],
-        metrics=[
-            Metric(key="count", label="Eligible samples", value=count),
-            Metric(key="runs", label="Runs", value=len(runs)),
-            Metric(key="missing_samples", label="Missing sequence numbers", value=missing),
-            Metric(
-                key="resolution_hz",
-                label="Frequency grid step",
-                value=float(frequencies[1] - frequencies[0]),
-                unit="Hz",
-            ),
-        ],
-        plots=[
+    annotations = []
+    if floor > 0:
+        series.append(
+            Series(
+                label="Noise floor (median)",
+                x=[float(frequencies[1]), float(frequencies[-1])],
+                y=[floor, floor],
+                color="#e0a73a",
+                dashed=True,
+            )
+        )
+        if peak_db is not None and peak_db >= 6:
+            annotations.append(
+                Annotation(x=peak_hz, y=float(density[peak]), text=f"{peak_hz:.2f} Hz  +{peak_db:.0f} dB")
+            )
+    plots = [
+        Plot(
+            title="Power spectral density",
+            x_label="Frequency (Hz)",
+            y_label="PSD (m^2/Hz)",
+            series=series,
+            x_scale="log",
+            y_scale="log",
+            annotations=annotations,
+        )
+    ]
+    offsets_s = [(times[-1] - times[0]) / 1000 for _, _, times, *_ in spectra]
+    heatmap = _spectrogram_heatmap(
+        [(centers, rows, duration) for (*_, centers, rows), duration in zip(spectra, offsets_s, strict=True)],
+        frequencies,
+    )
+    if heatmap is not None:
+        plots.append(
             Plot(
-                x_label="Frequency (Hz)",
-                y_label="Power (m^2)",
+                title="Spectrogram",
+                x_label="Recorded time (s)",
+                y_label="Frequency (Hz)",
+                series=[],
+                heatmap=heatmap,
+            )
+        )
+    if any(value is not None for value in rho):
+        lags = [float(lag) for lag in range(1, max_lag + 1)]
+        plots.append(
+            Plot(
+                title="Autocorrelation",
+                x_label="Lag (samples)",
+                y_label="Autocorrelation",
                 series=[
-                    Series(label="Pooled Lomb-Scargle spectrum", x=frequencies.tolist(), y=power.tolist())
+                    Series(
+                        label="Autocorrelation",
+                        x=lags,
+                        y=[value if value is not None else 0.0 for value in rho],
+                        style="stems",
+                        color="#3ecf9f",
+                    ),
+                    Series(
+                        label="95% white-noise limit",
+                        x=lags,
+                        y=[limit] * len(lags),
+                        dashed=True,
+                        color="#e0a73a",
+                    ),
+                    Series(
+                        label="Lower limit",
+                        x=lags,
+                        y=[-limit] * len(lags),
+                        dashed=True,
+                        color="#e0a73a",
+                        legend=False,
+                    ),
                 ],
             )
-        ],
-    )
+        )
+
+    tables = []
+    if len(spectra) >= 2:
+        rows = []
+        for (run_id, values, *_), mean in zip(spectra, run_density, strict=True):
+            run_peak = 1 + int(np.argmax(mean[1:]))
+            run_floor = float(np.median(mean[1:]))
+            rows.append(
+                [
+                    _run_label(run_id),
+                    float(frequencies[run_peak]),
+                    10 * math.log10(mean[run_peak] / run_floor) if run_floor > 0 else None,
+                    len(values),
+                ]
+            )
+        tables.append(
+            Table(
+                title="Dominant tone per run",
+                columns=["Run", "Peak (Hz)", "Above floor (dB)", "Samples"],
+                rows=rows,
+            )
+        )
+    if any(value is not None for value in rho):
+        tables.append(
+            Table(
+                title="Whiteness check",
+                columns=["Lag", "Autocorrelation", "95% limit", "Verdict"],
+                rows=[
+                    [lag, value, limit, "correlated" if abs(value) > limit else "within noise"]
+                    for lag, value in enumerate(rho[:5], start=1)
+                    if value is not None
+                ],
+            )
+        )
+
+    missing = sum(int(np.sum(np.diff(seq) - 1)) for _, _, _, seq, *_ in spectra)
+    notes = [
+        f"Hann windows of {segment} samples with 50% overlap, never crossing run boundaries; runs are "
+        "weighted by sample count. Each window is demeaned. The window length follows the longest "
+        "run, so a run still recording joins the estimate only once it holds a full window and the "
+        "frequency grid never changes while data arrive."
+    ]
+    if not regular:
+        notes.append(
+            "Gapped or jittered timing: every window uses the actual device timestamps "
+            "(Lomb-Scargle on Hann-tapered samples), scaled like a one-sided PSD, with no "
+            "interpolation or gap compression."
+        )
+    metrics = [
+        Metric(key="peak_hz", label="Dominant tone", value=peak_hz, unit="Hz"),
+        Metric(key="peak_excess_db", label="Tone above floor", value=peak_db, unit="dB"),
+        Metric(key="tonal_share_pct", label="Power in tone", value=tonal, unit="%"),
+        Metric(key="narrowband_pct", label="Windows with a tone", value=narrowband, unit="%"),
+        Metric(key="tone_wander_hz", label="Tone wander (std)", value=wander, unit="Hz"),
+        Metric(key="flatness", label="Spectral flatness", value=flatness),
+        Metric(key="acf_lag1", label="Lag-1 autocorr.", value=lag_one),
+        Metric(key="acf_lag2", label="Lag-2 autocorr.", value=lag_two),
+        Metric(key="count", label="Eligible samples", value=count),
+        Metric(key="runs", label="Runs", value=len(spectra)),
+        Metric(key="fs_hz", label="Device-timed sample rate", value=fs, unit="Hz"),
+        Metric(key="segment", label="Window", value=segment, unit="samples"),
+        Metric(key="resolution_hz", label="Frequency resolution", value=fs / segment, unit="Hz"),
+        Metric(key="windows", label="Averaged windows", value=window_count),
+    ]
+    if not regular:
+        metrics.append(Metric(key="missing_samples", label="Missing sequence numbers", value=missing))
+    return AnalysisResult(warnings=notes, metrics=metrics, plots=plots, tables=tables)

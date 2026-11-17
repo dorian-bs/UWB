@@ -27,7 +27,7 @@ from .experiments import BatchRunner, sample_yield_pct
 from .radio import _settle
 
 logger = logging.getLogger(__name__)
-ANALYSIS_VERSION = "noise-5"
+ANALYSIS_VERSION = "noise-7"
 
 
 class AnalysisService:

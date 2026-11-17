@@ -60,23 +60,30 @@ source fingerprint, outcomes, prior references, seed and library versions.
 | Summary | Count, signed bias, sample standard deviation (`ddof=1`), RMSE and linear-interpolated P95 absolute error |
 | Distribution fit | Density-normalized histogram with one maximum-likelihood fit chosen by the user: Gaussian, GMM, shifted log-normal, Student-t, Laplace or skew-normal; mean log likelihood, AIC, BIC and KS distance, plus a comparison of all models. Degenerate constant data is flagged |
 | GMM (fit option) | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads |
-| Spectrum | Sample-weighted within-run Welch density for regular timing, or Lomb-Scargle power for gaps/irregular cadence; uses every recorded run of the batch regardless of scope, skipping runs with fewer than 32 eligible samples |
+| Spectrum | Pooled PSD density (m²/Hz) with 95% band, per-run lines and noise floor; spectrogram over the recorded time; autocorrelation (lags 1-20, ±1.96/√N). Uses every recorded run of the batch regardless of scope |
 
-Welch requires increasing device times, consecutive sequences and every time
-delta within 5% of both its run median and the pooled median. The median
-device-time delta determines sample frequency, never the requested radio rate.
-Each run is analysed separately using Hann windows, constant detrending, half
-overlap, and segment length `min(256, shortest run length)`. Densities in m²/Hz
-are pooled by eligible sample count on a common frequency grid.
+Spectrum metrics: dominant tone (Hz), its excess over the median floor (dB),
+power share within ±2 bins, share of windows with a >12 dB narrowband peak,
+tone wander (std of the per-window peak frequency among tonal windows, ≥3),
+spectral flatness and lag-1/2 autocorrelation. Per-run dominant tones and a
+lag 1-5 whiteness check are tabulated.
 
-Missing samples, irregular timing, or differing cadences select Lomb-Scargle for
-the whole selection. Each run is mean-subtracted and evaluated at its actual
-device timestamps; unnormalized periodograms use `2/N` scaling and sample-weighted
-pooling. Results are power in m², **not PSD density**, so their scale is not
-directly comparable with Welch.
-The shared frequency grid starts at the reciprocal shortest run span and ends
-below half the slowest median cadence, with 256-4096 points at approximately five
-points per shortest-span frequency scale. Grid spacing is not physical resolution.
+The window is `min(256, max(32, longest_run // 2))` samples, so it depends only on the
+longest run. Runs shorter than one window (e.g. the run still recording) are left
+out with a warning until they fill it, which keeps the frequency grid stable and
+the spectrum from "resetting" when a new run of a batch starts. Windows never
+cross run boundaries; runs are weighted by sample count. The median device-time
+delta sets the sample frequency, never the requested radio rate.
+
+Regular timing (increasing device time, consecutive sequences, every delta within 5%
+of its run and pooled medians) uses Hann windows with half overlap and constant
+detrending (Welch). Gaps, jitter or differing cadences use time windows of
+`segment / fs` with half-window hop and ≥0.6·segment samples; each is Hann-tapered,
+mean-subtracted and evaluated with Lomb-Scargle at its real timestamps, scaled as a
+one-sided PSD density (`2·P·n / (fs·Σw²)`) on the same grid, so both paths are
+comparable. No interpolation or gap compression. The band is chi-square with
+≈1.89 degrees of freedom per window (Hann, 50% overlap). Grid spacing is
+`fs / segment`, which is also the bin width.
 
 No interpolation, gap compression, or concatenation across run boundaries occurs.
 Resets/duplicate sequences, non-increasing clocks, fewer than 32 eligible samples

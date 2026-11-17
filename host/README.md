@@ -144,7 +144,7 @@ independence between runs.
 | --- | --- |
 | Statistics | Count, signed bias, sample standard deviation, RMSE, P95 absolute error |
 | Histogram + Gaussian | Residual density and a single-Gaussian baseline |
-| Spectrum | Welch PSD for regular timing; Lomb-Scargle power for gaps/irregular cadence |
+| Spectrum | Log-log PSD (95% band, per-run lines, noise floor), spectrogram and autocorrelation; tone/wander/flatness metrics; Welch for regular timing, gap-aware Lomb-Scargle windows for jitter/gaps |
 | Gaussian mixture | A user-chosen 1-6-component fit, with weights, means, spreads, AIC/BIC |
 
 All methods use **every eligible recorded individual sample** in the selection,
@@ -157,10 +157,11 @@ Invalid/missing-prior/non-finite samples are counted as exclusions; no outliers 
 trimmed. Prior error is included. GMM components are not automatically LOS/NLOS
 classes. The moving demo is not stationary sensor-noise ground truth.
 
-Spectra stay within run boundaries. Welch density (m^2/Hz) and Lomb-Scargle power
-(m^2) have different scaling and must not be directly compared.
-Each run needs at least 32 eligible samples and increasing sequence/device time;
-at roughly 1 Hz, allow at least 32 seconds and enough successful samples.
+Spectra stay within run boundaries and are PSD densities (m^2/Hz) on both the Welch and
+Lomb-Scargle paths. The window length follows the longest run; a run shorter than one
+window (such as the one still recording) is left out until it fills, so the frequency
+grid does not change mid-batch. Each run needs at least 32 eligible samples and
+increasing sequence/device time; at roughly 1 Hz, allow at least 32 seconds.
 See [analysis semantics](../docs/EXPERIMENTS_AND_VALIDATION.md#repeated-run-console-and-initial-diagnostics)
 for timing checks and estimator details.
 

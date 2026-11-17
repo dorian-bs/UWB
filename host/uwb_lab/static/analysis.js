@@ -56,17 +56,53 @@ function analysisCardSummary(method, metrics) {
   }
   const labels = {
     std_m: "Std dev", p95_abs_m: "P95 error", log_likelihood: "Log-lik / sample", ks: "KS distance",
-    fs_hz: "Sample rate", segment: "Segment", missing_samples: "Missing",
-    resolution_hz: estimator === "Lomb-Scargle" ? "Grid step" : "Bin width",
+    fs_hz: "Sample rate", segment: "Window", missing_samples: "Missing",
+    resolution_hz: "Bin width", narrowband_pct: "Tone windows", tone_wander_hz: "Tone wander",
+    tonal_share_pct: "Power in tone", peak_excess_db: "Tone vs floor", acf_lag1: "Lag-1 corr.", acf_lag2: "Lag-2 corr.",
+  };
+  const descriptions = {
+    peak_excess_db: "Strongest line against the median noise floor; white noise stays below about 4 dB",
+    tonal_share_pct: "Share of all noise power within two bins of the strongest line",
+    narrowband_pct: "Share of windows holding a line 12 dB above their own median; white noise gives about 0%",
+    tone_wander_hz: "Standard deviation of the strongest line's frequency across windows that hold a tone",
+    flatness: "Geometric over arithmetic mean of the spectrum: 1 is perfectly white, near 0 is dominated by lines",
+    acf_lag1: "Correlation between neighbouring samples; white noise stays within about +-2/sqrt(n)",
+    acf_lag2: "Correlation two samples apart; a tone near a quarter of the sample rate makes this strongly negative",
+    segment: "Window length used for every averaged spectrum; it follows the longest run",
+    windows: "Number of overlapping windows averaged into the pooled spectrum",
+    resolution_hz: "Frequency spacing of the spectrum bins",
+    peak_hz: "Frequency of the strongest line in the pooled spectrum",
+    fs_hz: "Sampling rate measured from the device timestamps, not the requested rate",
   };
   return {
     estimator,
-    metrics: metrics.filter((metric) => !headerKeys.includes(metric.key))
+    descriptions,
+    metrics: metrics.filter((metric) => !headerKeys.includes(metric.key) && metric.key !== "missing_samples")
       .map((metric) => {
         const scope = metric.label?.match(/ \((?:full selection|window)\)$/)?.[0] || "";
-        return {...metric, title: metric.label, label: labels[metric.key] ? labels[metric.key] + scope : metric.label};
+        return {...metric, title: descriptions[metric.key] || metric.label, label: labels[metric.key] ? labels[metric.key] + scope : metric.label};
       }),
   };
+}
+
+const SPECTRUM_PLOT_NOTES = {
+  "Power spectral density": "Noise power per Hz on log-log axes. The bold line is the pooled estimate with its 95% confidence band, thin grey lines are individual runs, and the dashed line is the median noise floor. White noise is flat; a tone is a peak.",
+  "Spectrogram": "Spectrum over recorded time, runs laid end to end with dashed run boundaries. A wandering tone draws a moving ridge; white noise stays uniform.",
+  "Autocorrelation": "Correlation between samples a few steps apart. White noise stays inside the dashed 95% limits.",
+};
+
+function analysisExplanation(node, summary, plots) {
+  const details = node("details", null, "analysis-method-details");
+  details.append(node("summary", "What these statistics mean"));
+  const list = node("dl", null, "analysis-explain");
+  for (const metric of summary.metrics) {
+    list.append(node("dt", metric.label), node("dd", summary.descriptions[metric.key] || metric.title));
+  }
+  for (const plot of plots) {
+    if (SPECTRUM_PLOT_NOTES[plot.title]) list.append(node("dt", plot.title), node("dd", SPECTRUM_PLOT_NOTES[plot.title]));
+  }
+  details.append(list);
+  return details;
 }
 
 function analysisSourceSummary(output, field) {
@@ -89,8 +125,9 @@ function analysisSourceSummary(output, field) {
 }
 
 function analysisLegendLabels(series) {
-  if (series.length < 2) return [];
-  return series.map((curve) =>
+  const shown = series.filter((curve) => curve.legend !== false);
+  if (shown.length < 2) return [];
+  return shown.map((curve) =>
     curve.label === "Empirical density" ? "Samples" : curve.label.replace(/^Component (\d+)$/, "C$1"));
 }
 
@@ -224,61 +261,283 @@ function chartBounds(series) {
   return {x: extent(xs), y: extent(ys)};
 }
 
+function axisTransform(scale) {
+  return scale === "log" ? Math.log10 : (value) => value;
+}
+
+function plotBounds(plot) {
+  const logX = plot.x_scale === "log", logY = plot.y_scale === "log";
+  const toX = axisTransform(plot.x_scale), toY = axisTransform(plot.y_scale);
+  const xs = [], ys = logY ? [] : [0];
+  for (const curve of plot.series) {
+    if (curve.x.length !== curve.y.length || (curve.y2 && curve.y2.length !== curve.y.length)) {
+      throw new Error("Mismatched analysis coordinates");
+    }
+    for (let index = 0; index < curve.x.length; index++) {
+      for (const y of curve.y2 ? [curve.y[index], curve.y2[index]] : [curve.y[index]]) {
+        if (!Number.isFinite(curve.x[index]) || !Number.isFinite(y)) throw new Error("Non-finite analysis coordinates");
+        if ((logX && curve.x[index] <= 0) || (logY && y <= 0)) continue;
+        xs.push(toX(curve.x[index])); ys.push(toY(y));
+      }
+    }
+  }
+  if (!xs.length) throw new Error("No plot coordinates");
+  const extent = (values, log) => {
+    let min = values[0], max = values[0];
+    for (const value of values) { min = Math.min(min, value); max = Math.max(max, value); }
+    const padding = max > min ? (max - min) * (log ? 0.04 : 0.06) : log ? 0.5 : Math.max(Math.abs(min) * 0.05, 0.001);
+    return {min: min - padding, max: max + padding};
+  };
+  return {x: extent(xs, logX), y: extent(ys, logY)};
+}
+
+// Tick positions in log10 units: decades, plus 2 and 5 when the range is narrow enough to stay readable.
+function logTicks(min, max, maxSpan) {
+  const mantissas = max - min > maxSpan ? [1] : [1, 2, 5];
+  const ticks = [];
+  for (let exponent = Math.floor(min); exponent <= Math.ceil(max); exponent++) {
+    for (const mantissa of mantissas) {
+      const tick = exponent + Math.log10(mantissa);
+      if (tick >= min - 1e-9 && tick <= max + 1e-9) ticks.push(tick);
+    }
+  }
+  return ticks;
+}
+
+function formatLogTick(tick) {
+  const value = 10 ** tick;
+  return value >= 0.01 && value < 10000 ? String(Number(value.toPrecision(2))) : value.toExponential(0).replace("e+", "e");
+}
+
+// Dark-to-bright perceptual ramp for the spectrogram; t is clamped to [0, 1].
+function heatColor(t) {
+  const stops = [[68, 1, 84], [59, 82, 139], [33, 144, 141], [93, 200, 99], [253, 231, 37]];
+  const scaled = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0)) * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(scaled)), fraction = scaled - index;
+  return stops[index].map((channel, slot) => Math.round(channel + (stops[index + 1][slot] - channel) * fraction));
+}
+
 function chartTheme() {
   if (document.documentElement.dataset.theme === "light") {
     return {
-      text: "#52615e", grid: "#dfe5e2", zero: "#8a9893", panel: "#fff",
+      text: "#52615e", grid: "#dfe5e2", zero: "#8a9893", axis: "#5a6a65", panel: "#fff",
       series: {raw_m: "#536878", corrected_m: "#176b87", expected_m: "#966000", residual_m: "#b63036", rolling_bias_m: "#7851a9", rolling_std_m: "#087f5b", rate_hz: "#0a8f5a", requested_hz: "#6b7a76"},
       curves: ["#176b87", "#087f5b", "#966000", "#b63036", "#7851a9", "#536878", "#b35c10"],
     };
   }
   return {
-    text: "#9aaaa5", grid: "#2a3532", zero: "#6f7e79", panel: "#18201e", series: {},
+    text: "#9aaaa5", grid: "#2a3532", zero: "#6f7e79", axis: "#4c5853", panel: "#18201e", series: {},
     curves: ["#4fb3d1", "#3ecf9f", "#e0a73a", "#ff6b72", "#b08fe0", "#8fa7b8", "#d47729"],
   };
 }
 
-function drawAnalysisChart(canvas, plot) {
-  const theme = chartTheme();
-  const bounds = chartBounds(plot.series);
-  const width = canvas.clientWidth || 400, height = 220, ratio = window.devicePixelRatio || 1;
+function prepareCanvas(canvas, plot) {
+  const width = canvas.clientWidth || 400, height = canvas.clientHeight || 220, ratio = window.devicePixelRatio || 1;
   canvas.width = width * ratio; canvas.height = height * ratio;
   const context = canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const area = {left: 66, right: width - 12, top: 12, bottom: 178};
-  const x = (value) => area.left + (value - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
-  const y = (value) => area.bottom - (value - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
+  canvas._plot = plot;
+  if (!canvas._hoverBound) {
+    canvas._hoverBound = true;
+    const position = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+    };
+    canvas.addEventListener("mousemove", (event) => drawAnalysisChart(canvas, canvas._plot, position(event)));
+    canvas.addEventListener("mouseleave", () => drawAnalysisChart(canvas, canvas._plot));
+  }
+  return {context, width, height};
+}
+
+// Left and bottom axis lines only; no closed frame around the plot area.
+function drawAxes(context, theme, area) {
+  context.strokeStyle = theme.axis; context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(area.left, area.top); context.lineTo(area.left, area.bottom); context.lineTo(area.right, area.bottom);
+  context.stroke();
+}
+
+function drawReadout(context, theme, area, lines, anchorX) {
+  context.font = "10px system-ui";
+  const boxWidth = Math.max(...lines.map((line) => context.measureText(line).width)) + 12;
+  const boxHeight = lines.length * 13 + 8;
+  const left = anchorX + 10 + boxWidth > area.right ? anchorX - 10 - boxWidth : anchorX + 10;
+  context.fillStyle = theme.panel; context.strokeStyle = theme.zero; context.lineWidth = 1;
+  context.fillRect(left, area.top + 2, boxWidth, boxHeight); context.strokeRect(left, area.top + 2, boxWidth, boxHeight);
+  context.fillStyle = theme.text; context.textAlign = "left";
+  lines.forEach((line, index) => context.fillText(line, left + 6, area.top + 15 + index * 13));
+}
+
+function formatHeatAxis(value) {
+  const magnitude = Math.abs(value);
+  return String(Number(value.toFixed(magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2)));
+}
+
+function drawHeatmapChart(canvas, plot, hover) {
+  const theme = chartTheme(), map = plot.heatmap;
+  const {context, width, height} = prepareCanvas(canvas, plot);
+  const area = {left: 52, right: width - 66, top: 12, bottom: height - 42};
+  const edges = (values) => {
+    if (values.length < 2) return [values[0] - 0.5, values[0] + 0.5];
+    return [values[0] - (values[1] - values[0]) / 2, values.at(-1) + (values.at(-1) - values.at(-2)) / 2];
+  };
+  const [x0, x1] = edges(map.x), [y0, y1] = edges(map.y);
+  const px = (value) => area.left + (value - x0) / (x1 - x0) * (area.right - area.left);
+  const py = (value) => area.bottom - (value - y0) / (y1 - y0) * (area.bottom - area.top);
+  const span = map.z_max - map.z_min || 1;
+  if (canvas._heatSource !== map) {
+    const image = document.createElement("canvas");
+    image.width = map.x.length; image.height = map.y.length;
+    const imageContext = image.getContext("2d"), pixels = imageContext.createImageData(image.width, image.height);
+    map.z.forEach((row, rowIndex) => row.forEach((value, column) => {
+      const offset = (((map.y.length - 1 - rowIndex) * map.x.length) + column) * 4;
+      pixels.data.set([...heatColor((value - map.z_min) / span), 255], offset);
+    }));
+    imageContext.putImageData(pixels, 0, 0);
+    canvas._heatSource = map; canvas._heatImage = image;
+  }
+  context.fillStyle = theme.panel; context.fillRect(0, 0, width, height);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(canvas._heatImage, area.left, area.top, area.right - area.left, area.bottom - area.top);
+  context.font = "10px system-ui"; context.lineWidth = 1;
+  context.setLineDash([3, 3]); context.strokeStyle = "rgba(255,255,255,0.55)";
+  for (const marker of map.markers) {
+    context.beginPath(); context.moveTo(px(marker), area.top); context.lineTo(px(marker), area.bottom); context.stroke();
+  }
+  context.setLineDash([]);
+  drawAxes(context, theme, area);
+  context.fillStyle = theme.text;
+  for (let tick = 0; tick <= 4; tick++) {
+    const xv = x0 + tick * (x1 - x0) / 4, yv = y0 + tick * (y1 - y0) / 4;
+    context.textAlign = "center"; context.fillText(formatHeatAxis(xv), px(xv), area.bottom + 15);
+    context.textAlign = "right"; context.fillText(formatHeatAxis(yv), area.left - 5, py(yv) + 3);
+  }
+  const barLeft = width - 52, barWidth = 10, barHeight = area.bottom - area.top;
+  for (let step = 0; step < barHeight; step++) {
+    context.fillStyle = `rgb(${heatColor(1 - step / barHeight).join(",")})`;
+    context.fillRect(barLeft, area.top + step, barWidth, 1);
+  }
+  context.fillStyle = theme.text; context.textAlign = "left";
+  for (const fraction of [0, 0.5, 1]) {
+    const value = map.z_min + fraction * span;
+    context.fillText(`${value >= 0 ? "+" : ""}${value.toFixed(0)} dB`, barLeft + barWidth + 3, area.bottom - fraction * barHeight + (fraction ? 3 : 0));
+  }
+  context.textAlign = "center";
+  context.fillText(plot.x_label, (area.left + area.right) / 2, height - 6);
+  context.save(); context.translate(11, (area.top + area.bottom) / 2); context.rotate(-Math.PI / 2);
+  context.fillText(plot.y_label, 0, 0); context.restore();
+  if (hover && hover.x >= area.left && hover.x <= area.right && hover.y >= area.top && hover.y <= area.bottom) {
+    const column = Math.max(0, Math.min(map.x.length - 1, Math.round((hover.x - area.left) / (area.right - area.left) * map.x.length - 0.5)));
+    const row = Math.max(0, Math.min(map.y.length - 1, Math.round((area.bottom - hover.y) / (area.bottom - area.top) * map.y.length - 0.5)));
+    const value = map.z[row][column];
+    context.strokeStyle = "rgba(255,255,255,0.8)";
+    context.strokeRect(px(map.x[column] - (x1 - x0) / map.x.length / 2), py(map.y[row] + (y1 - y0) / map.y.length / 2),
+      (area.right - area.left) / map.x.length, (area.bottom - area.top) / map.y.length);
+    drawReadout(context, theme, area, [
+      `t ${formatHeatAxis(map.x[column])} s`, `f ${formatHeatAxis(map.y[row])} Hz`,
+      `${value >= 0 ? "+" : ""}${value.toFixed(1)} dB`,
+    ], hover.x);
+  }
+}
+
+function drawAnalysisChart(canvas, plot, hover = null) {
+  if (plot.heatmap) { drawHeatmapChart(canvas, plot, hover); return; }
+  const theme = chartTheme();
+  const bounds = plotBounds(plot);
+  const {context, width, height} = prepareCanvas(canvas, plot);
+  const logX = plot.x_scale === "log", logY = plot.y_scale === "log";
+  const toX = axisTransform(plot.x_scale), toY = axisTransform(plot.y_scale);
+  const area = {left: 66, right: width - 12, top: 12, bottom: height - 42};
+  const x = (value) => area.left + (toX(value) - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
+  const y = (value) => area.bottom - (toY(value) - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
+  const visible = (px, py) => (!logX || px > 0) && (!logY || py > 0);
   const xUnit = plot.x_label.match(/\(([^)]+)\)$/)?.[1] || "";
   const yUnit = plot.y_label.match(/\(([^)]+)\)$/)?.[1] || "";
   context.fillStyle = theme.panel; context.fillRect(0, 0, width, height);
   context.font = "10px system-ui"; context.lineWidth = 1;
-  for (let tick = 0; tick <= 4; tick++) {
-    const value = bounds.y.min + tick * (bounds.y.max - bounds.y.min) / 4;
-    context.strokeStyle = theme.grid; context.beginPath(); context.moveTo(area.left, y(value)); context.lineTo(area.right, y(value)); context.stroke();
-    context.fillStyle = theme.text; context.textAlign = "right"; context.fillText(formatAnalysisValue(value, yUnit), area.left - 5, y(value) + 3);
-    const xv = bounds.x.min + tick * (bounds.x.max - bounds.x.min) / 4;
-    context.textAlign = "center"; context.fillText(formatAnalysisValue(xv, xUnit), x(xv), area.bottom + 15);
+  const ticks = (axis, log, maxSpan) => log
+    ? logTicks(axis.min, axis.max, maxSpan)
+    : Array.from({length: 5}, (_, tick) => axis.min + tick * (axis.max - axis.min) / 4);
+  const gridX = (tick) => area.left + (tick - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
+  const gridY = (tick) => area.bottom - (tick - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
+  for (const tick of ticks(bounds.y, logY, 2)) {
+    context.strokeStyle = theme.grid; context.beginPath(); context.moveTo(area.left, gridY(tick)); context.lineTo(area.right, gridY(tick)); context.stroke();
+    context.fillStyle = theme.text; context.textAlign = "right";
+    context.fillText(logY ? formatLogTick(tick) : formatAnalysisValue(tick, yUnit), area.left - 5, gridY(tick) + 3);
+  }
+  for (const tick of ticks(bounds.x, logX, 3)) {
+    if (logX) {
+      context.strokeStyle = theme.grid; context.beginPath(); context.moveTo(gridX(tick), area.top); context.lineTo(gridX(tick), area.bottom); context.stroke();
+    }
+    context.fillStyle = theme.text; context.textAlign = "center";
+    context.fillText(logX ? formatLogTick(tick) : formatAnalysisValue(tick, xUnit), gridX(tick), area.bottom + 15);
   }
   const colors = theme.curves;
-  plot.series.forEach((curve, index) => {
+  const order = [...plot.series.keys()].sort((a, b) => (plot.series[b].style === "band") - (plot.series[a].style === "band"));
+  for (const index of order) {
+    const curve = plot.series[index];
     const color = curve.color || colors[index % colors.length];
     context.strokeStyle = context.fillStyle = colorWithAlpha(color, curve.alpha ?? 1);
-    context.lineWidth = 1.6; context.beginPath();
+    context.lineWidth = curve.width ?? (curve.style === "line" && !curve.dashed && curve.alpha == null ? 1.6 : 1.2);
+    context.setLineDash(curve.dashed ? [5, 4] : []);
+    if (curve.style === "band") {
+      const points = curve.x.map((value, point) => point).filter((point) => visible(curve.x[point], curve.y[point]) && visible(curve.x[point], curve.y2[point]));
+      if (points.length > 1) {
+        context.beginPath();
+        points.forEach((point, step) => step ? context.lineTo(x(curve.x[point]), y(curve.y2[point])) : context.moveTo(x(curve.x[point]), y(curve.y2[point])));
+        [...points].reverse().forEach((point) => context.lineTo(x(curve.x[point]), y(curve.y[point])));
+        context.closePath(); context.fill();
+      }
+      continue;
+    }
+    context.beginPath();
     const barWidth = curve.x.length > 1 ? Math.max(1, Math.abs(x(curve.x[1]) - x(curve.x[0])) * 0.85) : 10;
+    let pen = false;
     curve.x.forEach((value, point) => {
+      if (!visible(value, curve.y[point])) { pen = false; return; }
       const px = x(value), py = y(curve.y[point]);
       if (curve.style === "bars") context.fillRect(px - barWidth / 2, Math.min(py, y(0)), barWidth, Math.max(1, Math.abs(y(0) - py)));
       else if (curve.style === "stems") { context.moveTo(px, y(0)); context.lineTo(px, py); }
       else if (curve.style === "points") { context.moveTo(px + 2, py); context.arc(px, py, 2, 0, 2 * Math.PI); }
-      else if (point === 0) context.moveTo(px, py);
+      else if (!pen) { context.moveTo(px, py); pen = true; }
       else context.lineTo(px, py);
     });
     context.stroke();
-  });
-  context.fillStyle = theme.text; context.textAlign = "center";
-  context.fillText(plot.x_label, width / 2, 214);
-  context.save(); context.translate(12, 95); context.rotate(-Math.PI / 2);
+  }
+  context.setLineDash([]);
+  drawAxes(context, theme, area);
+  for (const note of plot.annotations || []) {
+    if (!visible(note.x, note.y)) continue;
+    const px = x(note.x), py = y(note.y);
+    context.strokeStyle = "#ff6b72"; context.fillStyle = "#ff6b72"; context.lineWidth = 1.5;
+    context.beginPath(); context.arc(px, py, 4, 0, 2 * Math.PI); context.stroke();
+    context.font = "11px system-ui"; context.textAlign = px > area.right - 130 ? "right" : "left";
+    context.fillText(note.text, px + (context.textAlign === "left" ? 8 : -8), Math.max(area.top + 11, py - 8));
+  }
+  context.font = "10px system-ui"; context.fillStyle = theme.text; context.textAlign = "center";
+  context.fillText(plot.x_label, (area.left + area.right) / 2, height - 6);
+  context.save(); context.translate(12, (area.top + area.bottom) / 2); context.rotate(-Math.PI / 2);
   context.fillText(plot.y_label, 0, 0); context.restore();
+  if (hover && hover.x >= area.left && hover.x <= area.right) {
+    const inverse = (hover.x - area.left) / (area.right - area.left) * (bounds.x.max - bounds.x.min) + bounds.x.min;
+    const target = logX ? 10 ** inverse : inverse;
+    const lines = [];
+    let anchor = null;
+    for (const curve of plot.series) {
+      if (curve.style === "band" || curve.legend === false || !curve.x.length) continue;
+      let best = 0;
+      curve.x.forEach((value, point) => { if (Math.abs(value - target) < Math.abs(curve.x[best] - target)) best = point; });
+      anchor = anchor ?? curve.x[best];
+      const value = curve.y[best];
+      lines.push(`${curve.label}: ${logY ? value.toExponential(2) : formatAnalysisValue(value, yUnit)}`);
+    }
+    if (anchor !== null) {
+      context.strokeStyle = theme.zero; context.setLineDash([2, 3]);
+      context.beginPath(); context.moveTo(x(anchor), area.top); context.lineTo(x(anchor), area.bottom); context.stroke();
+      context.setLineDash([]);
+      drawReadout(context, theme, area, [`${plot.x_label.replace(/ \(.*\)$/, "")} ${formatAnalysisValue(anchor, xUnit)} ${xUnit}`, ...lines], x(anchor));
+    }
+  }
 }
 
 function startAnalysisPanel({request, showError}) {
@@ -290,6 +549,7 @@ function startAnalysisPanel({request, showError}) {
   let mode = "cumulative", plots = [], timer = null, hasResults = false;
   let cards = new Map();
   const compareOpen = new Map();
+  const plotOpen = new Map();
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
     if (text != null) element.textContent = text;
@@ -514,7 +774,7 @@ function startAnalysisPanel({request, showError}) {
       card.dataset.method = item.method;
       const summary = analysisCardSummary(item.method, result.metrics);
       const header = node("header", null, "analysis-card-header");
-      const titles = {statistics: "Residuals", distribution: "Distribution fit", psd: "Spectrum (all runs)"};
+      const titles = {statistics: "Residuals", distribution: "Distribution fit", psd: "Noise spectrum (all runs)"};
       const title = node("div", null, "analysis-card-title");
       title.append(node("h3", `${titles[item.method] || item.label}${item.run_id ? ` - ${item.run_id}` : ""}`));
       // Methodology notes live behind an info button instead of an extra disclosure.
@@ -548,23 +808,45 @@ function startAnalysisPanel({request, showError}) {
         metrics.append(cell);
       }
       if (summary.metrics.length) card.append(metrics);
-      const comparisons = [];
+      const comparisons = [], afterPlots = [];
       for (const value of result.tables) {
         if (value.title === "Compare models") comparisons.push(value);
+        // Spectrum tables support the charts, so they follow them.
+        else if (item.method === "psd") afterPlots.push(value);
         else card.append(table(value.columns, value.rows));
       }
       for (const plot of result.plots) {
         const canvas = node("canvas");
+        if (item.method === "psd") canvas.className = "plot-tall";
         canvas.setAttribute("aria-label", `${item.label}: ${plot.x_label}; ${plot.y_label}`);
-        card.append(canvas);
         const labels = analysisLegendLabels(plot.series);
+        let legend = null;
         if (labels.length) {
-          const legend = node("p", labels.join(" / "), "plot-note");
-          legend.title = plot.series.map((curve) => curve.label).join(" / ");
-          card.append(legend);
+          legend = node("p", labels.join(" / "), "plot-note");
+          legend.title = plot.series.filter((curve) => curve.legend !== false).map((curve) => curve.label).join(" / ");
+        }
+        if (item.method === "psd" && plot.title) {
+          // Each spectrum chart sits in its own roll-down; hidden canvases have no size, so redraw on open.
+          const key = plot.title, fold = node("details", null, "analysis-method-details analysis-plot");
+          fold.open = plotOpen.has(key) ? plotOpen.get(key) : key === "Power spectral density";
+          fold.addEventListener("toggle", () => {
+            plotOpen.set(key, fold.open);
+            if (fold.open) drawAnalysisChart(canvas, plot);
+          });
+          fold.append(node("summary", plot.title), canvas);
+          if (legend) fold.append(legend);
+          card.append(fold);
+        } else {
+          if (plot.title) card.append(node("p", plot.title, "plot-title"));
+          card.append(canvas);
+          if (legend) card.append(legend);
         }
         cardPlots.push({canvas, plot});
       }
+      for (const value of afterPlots) {
+        card.append(node("p", value.title, "plot-title"), table(value.columns, value.rows));
+      }
+      if (item.method === "psd") card.append(analysisExplanation(node, summary, result.plots));
       result.warnings.filter((warning) => !methodNotes.includes(warning))
         .forEach((warning) => card.append(node("p", warning, "plot-note")));
       for (const value of comparisons) {
@@ -781,6 +1063,6 @@ function startAnalysisPanel({request, showError}) {
 
 if (typeof module !== "undefined") module.exports = {
   validateAnalysisPreferences, resultMatches, chartBounds, formatAnalysisValue, analysisCardSummary,
-  analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, comparisonMetricTiles,
+  plotBounds, logTicks, heatColor, drawAnalysisChart, analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, comparisonMetricTiles,
   overlaySeries, colorWithAlpha, comparisonDeltaClass, comparisonLegendLabels,
 };

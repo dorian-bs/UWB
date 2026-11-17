@@ -126,7 +126,7 @@ def test_pooled_psd_weights_individual_samples_without_joining_run_boundaries():
 
     runs = []
     expected = []
-    for name, count, amplitude in [("first", 128, 1), ("second", 512, 3)]:
+    for name, count, amplitude in [("first", 512, 1), ("second", 1024, 3)]:
         times = np.arange(count) * 100
         values = amplitude * np.sin(2 * np.pi * 1.25 * times / 1000)
         runs.append((name, values, times, np.arange(count)))
@@ -134,8 +134,8 @@ def test_pooled_psd_weights_individual_samples_without_joining_run_boundaries():
             values,
             fs=10,
             window="hann",
-            nperseg=128,
-            noverlap=64,
+            nperseg=256,
+            noverlap=128,
             detrend="constant",
             scaling="density",
         )
@@ -144,10 +144,10 @@ def test_pooled_psd_weights_individual_samples_without_joining_run_boundaries():
     assert result.status == "ok"
     curve = result.plots[0].series[0]
     np.testing.assert_allclose(curve.x, frequencies)
-    np.testing.assert_allclose(curve.y, sum(expected) / 640)
+    np.testing.assert_allclose(curve.y, sum(expected) / 1536, rtol=1e-7, atol=1e-12 * max(curve.y))
     assert curve.x[int(np.argmax(curve.y))] == pytest.approx(1.25)
     metrics = {metric.key: metric.value for metric in result.metrics}
-    assert metrics["count"] == 640
+    assert metrics["count"] == 1536
     assert metrics["runs"] == 2
     assert result.warnings
 
@@ -178,24 +178,25 @@ def test_gapped_spectrum_recovers_tone_from_actual_timestamps_without_interpolat
     plot = result.plots[0]
     curve = plot.series[0]
     assert "Lomb-Scargle" in curve.label
-    assert plot.y_label == "Power (m^2)"
-    assert curve.x[int(np.argmax(curve.y))] == pytest.approx(1.25, abs=0.015)
-    assert max(curve.y) == pytest.approx(0.5, abs=0.03)
+    assert plot.y_label == "PSD (m^2/Hz)"
+    assert curve.x[int(np.argmax(curve.y))] == pytest.approx(1.25, abs=0.04)
+    # The density integrates to the variance of the tone (1/2), as a Welch PSD would.
+    assert np.sum(curve.y) * (curve.x[1] - curve.x[0]) == pytest.approx(0.5, rel=0.15)
     metrics = {metric.key: metric.value for metric in result.metrics}
     assert metrics["count"] == int(keep.sum())
     assert metrics["missing_samples"] > 0
-    assert any("not a PSD density" in notice for notice in result.warnings)
+    assert metrics["peak_hz"] == pytest.approx(1.25, abs=0.04)
+    assert any("actual device timestamps" in notice for notice in result.warnings)
     json.dumps(result.model_dump(), allow_nan=False)
 
 
-def test_lomb_scargle_pooling_is_sample_weighted_and_does_not_join_pauses():
+def test_gapped_pooling_is_sample_weighted_and_does_not_join_pauses():
     import numpy as np
-    from scipy import signal
 
     from uwb_lab.analysis import pooled_power_spectrum
 
     runs = []
-    for run_id, count, amplitude in [("first", 480, 1), ("second", 960, 2)]:
+    for run_id, count, amplitude in [("first", 600, 1), ("second", 1200, 2)]:
         sequences = np.arange(count)
         keep = sequences % 11 != 0
         times = sequences * 100 + (0 if run_id == "first" else 10000000)
@@ -204,25 +205,92 @@ def test_lomb_scargle_pooling_is_sample_weighted_and_does_not_join_pauses():
     result = pooled_power_spectrum(runs)
     assert result.status == "ok"
     curve = result.plots[0].series[0]
-    expected = np.zeros(len(curve.x))
-    count = sum(len(values) for _, values, _, _ in runs)
-    for _, values, times, _ in runs:
-        expected += (
-            2
-            * signal.lombscargle(
-                (times - times[0]) / 1000,
-                values - np.mean(values),
-                2 * np.pi * np.array(curve.x),
-                normalize=False,
-            )
-            / count
-        )
-    np.testing.assert_allclose(curve.y, expected)
-    assert curve.x[int(np.argmax(curve.y))] == pytest.approx(1.25, abs=0.015)
-    assert max(curve.x) < 5
+    assert "Lomb-Scargle" in curve.label
+    first = pooled_power_spectrum(runs[:1]).plots[0].series[0].y
+    second = pooled_power_spectrum(runs[1:]).plots[0].series[0].y
+    weights = [len(run[1]) for run in runs]
+    np.testing.assert_allclose(
+        curve.y, (weights[0] * np.array(first) + weights[1] * np.array(second)) / sum(weights)
+    )
+    assert curve.x[int(np.argmax(curve.y))] == pytest.approx(1.25, abs=0.04)
+    assert max(curve.x) <= 5
     metrics = {metric.key: metric.value for metric in result.metrics}
-    assert metrics["count"] == count
+    assert metrics["count"] == sum(weights)
     assert metrics["runs"] == 2
+
+
+def test_spectrum_grid_does_not_move_while_a_new_run_is_still_filling():
+    import numpy as np
+
+    from uwb_lab.analysis import pooled_power_spectrum
+
+    rng = np.random.default_rng(5)
+
+    def run(name, count):
+        sequences = np.arange(count)
+        keep = rng.random(count) > 0.03
+        return name, rng.normal(0, 0.01, count)[keep], (sequences * 33)[keep], sequences[keep]
+
+    finished = [run("a-run-0001", 1800), run("a-run-0002", 1800)]
+    grids = []
+    for filling in (40, 100, 255):
+        result = pooled_power_spectrum([*finished, run("a-run-0003", filling)])
+        curve = result.plots[0].series[0]
+        grids.append((curve.x, {m.key: m.value for m in result.metrics}))
+        assert any("Left out runs" in notice and "a-run-0003" in notice for notice in result.warnings)
+    for x, metrics in grids[1:]:
+        assert x == grids[0][0]
+        assert metrics["segment"] == grids[0][1]["segment"] == 256
+        assert metrics["runs"] == 2
+    joined = pooled_power_spectrum([*finished, run("a-run-0003", 400)])
+    assert {m.key: m.value for m in joined.metrics}["runs"] == 3
+    assert joined.plots[0].series[0].x == grids[0][0]
+
+
+def test_spectrum_flags_a_wandering_tone_and_separates_it_from_white_noise():
+    import numpy as np
+
+    from uwb_lab.analysis import pooled_power_spectrum
+
+    rng = np.random.default_rng(11)
+    fs = 30.0
+
+    def runs(tone):
+        out = []
+        for index in range(4):
+            sequences = np.arange(1800)
+            times = np.round(sequences * 1000 / fs).astype(np.int64)
+            values = rng.normal(0, 0.01, len(sequences)) + tone * np.sin(2 * np.pi * 7.5 * sequences / fs)
+            out.append((f"x-run-{index + 1:04d}", values, times, sequences))
+        return out
+
+    white = pooled_power_spectrum(runs(0))
+    tonal = pooled_power_spectrum(runs(0.02))
+    white_metrics = {m.key: m.value for m in white.metrics}
+    tonal_metrics = {m.key: m.value for m in tonal.metrics}
+    assert white_metrics["narrowband_pct"] == 0
+    assert white_metrics["peak_excess_db"] < 4
+    assert white_metrics["flatness"] > 0.95
+    assert abs(white_metrics["acf_lag2"]) < 0.05
+    assert tonal_metrics["peak_hz"] == pytest.approx(7.5, abs=0.15)
+    assert tonal_metrics["peak_excess_db"] > 15
+    assert tonal_metrics["narrowband_pct"] > 90
+    assert tonal_metrics["acf_lag2"] < -0.5
+    assert tonal_metrics["flatness"] < 0.5
+    spectrum, spectrogram, correlation = tonal.plots
+    assert spectrum.x_scale == spectrum.y_scale == "log"
+    assert spectrum.annotations and "7.5" in spectrum.annotations[0].text
+    assert {series.style for series in spectrum.series} >= {"line", "band"}
+    heatmap = spectrogram.heatmap
+    assert len(heatmap.z) == len(heatmap.y) and len(heatmap.z[0]) == len(heatmap.x)
+    assert len(heatmap.markers) == 3
+    ridge = int(np.argmin(np.abs(np.array(heatmap.y) - 7.5)))
+    assert np.mean(heatmap.z[ridge]) > np.mean(heatmap.z) + 10
+    assert correlation.series[0].style == "stems"
+    assert [table.title for table in tonal.tables] == ["Dominant tone per run", "Whiteness check"]
+    assert len(tonal.tables[0].rows) == 4 and tonal.tables[0].rows[0][0] == "#1"
+    assert any(row[3] == "correlated" for row in tonal.tables[1].rows)
+    json.dumps(tonal.model_dump(), allow_nan=False)
 
 
 def test_gapped_spectrum_handles_constants_but_still_rejects_resets_and_short_runs():

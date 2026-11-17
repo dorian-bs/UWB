@@ -141,8 +141,10 @@ NumPy/SciPy/scikit-learn implement statistics, the histogram with a selectable
 distribution fit (Gaussian, GMM, log-normal, Student-t, Laplace, skew-normal)
 and the spectrum. The spectrum always pools every recorded run of the batch,
 whatever the scope selection. Samples are pooled by count, not by averaging run means.
-Spectra stay within run boundaries: regular timing uses Welch density;
-gaps/irregular cadence use Lomb-Scargle power. See
+Spectra stay within run boundaries and are always PSD densities (m²/Hz): regular
+timing uses Hann/Welch windows; gaps/irregular cadence use per-window Lomb-Scargle on
+the real timestamps. The window length follows the longest run, so a run still
+recording never changes the frequency grid. See
 [method semantics](EXPERIMENTS_AND_VALIDATION.md#repeated-run-console-and-initial-diagnostics)
 for eligibility, scaling, and limitations.
 

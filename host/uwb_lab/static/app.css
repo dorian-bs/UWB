@@ -244,7 +244,15 @@ label > .info { position: absolute; top: 0; right: 0; margin: 0; }
 .analysis-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .analysis-card-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .analysis-card h3 { font-size: 14px; margin: 0; }
-.analysis-card canvas { height: 220px; margin-top: 10px; border-radius: var(--radius); }
+.analysis-card canvas { height: 220px; margin-top: 10px; border-radius: var(--radius); cursor: crosshair; }
+.analysis-card canvas.plot-tall { height: 280px; }
+.analysis-card .analysis-plot canvas { border: 0; box-shadow: none; background: transparent; border-radius: 0; margin-top: 8px; }
+.analysis-plot > summary { font-size: 12px; font-weight: 600; color: var(--ink); }
+.analysis-explain { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 11px; }
+.analysis-explain dt { font-weight: 600; color: var(--ink); }
+.analysis-explain dd { margin: 0; font: 400 11px/1.4 system-ui, sans-serif; color: var(--muted); }
+.plot-title { margin: 14px 0 0; font-size: 12px; font-weight: 600; color: var(--ink); }
+.plot-title + canvas { margin-top: 6px; }
 .analysis-badge { border: 1px solid #dfe6e2; border-radius: 12px; padding: 3px 8px; color: var(--muted); background: #f5f8f6; font-size: 11px; font-variant-numeric: tabular-nums; }
 .analysis-badge--method { background: #edf5f8; border-color: #c8dde5; color: var(--blue); font-weight: 600; }
 .analysis-notice { margin-bottom: 10px; padding: 8px; border-radius: var(--radius); background: #fff4dc; color: #775019; font-size: 12px; overflow-wrap: anywhere; }

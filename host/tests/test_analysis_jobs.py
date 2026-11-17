@@ -96,7 +96,7 @@ def test_analysis_updates_spectrum_after_a_missing_recorded_sample(tmp_path, mod
         spectrum = output["results"][0]["result"]
         assert spectrum["status"] == "ok", spectrum
         assert "Lomb-Scargle" in spectrum["plots"][0]["series"][0]["label"]
-        assert spectrum["plots"][0]["y_label"] == "Power (m^2)"
+        assert spectrum["plots"][0]["y_label"] == "PSD (m^2/Hz)"
         metrics = {metric["key"]: metric["value"] for metric in spectrum["metrics"]}
         assert metrics["count"] == 77
         assert metrics["missing_samples"] == 1
