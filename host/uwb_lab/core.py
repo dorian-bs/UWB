@@ -5,6 +5,7 @@ import math
 import os
 import re
 import statistics
+import time
 import uuid
 from collections import deque
 from contextlib import ExitStack
@@ -222,6 +223,8 @@ class LabState:
         self.sequence_gaps = 0
         self.last_sequence: int | None = None
         self.last_diag: dict[str, Any] | None = None
+        self.recent_ignored: deque[str] = deque(maxlen=5)
+        self.last_sample_monotonic: float | None = None
 
     @property
     def prior(self) -> Prior | None:
@@ -246,6 +249,7 @@ class LabState:
                 self.malformed_lines += 1
             else:
                 self.ignored_lines += 1
+                self.recent_ignored.append(line.strip()[:200])
             return None
 
         if sample["v"] == 2:
@@ -255,6 +259,7 @@ class LabState:
             self.sequence_gaps += sequence - self.last_sequence - 1
         self.last_sequence = sequence
         self.total_samples += 1
+        self.last_sample_monotonic = time.monotonic()
 
         prior = self.prior
         if prior is not None:

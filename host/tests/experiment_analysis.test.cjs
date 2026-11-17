@@ -7,7 +7,7 @@ const {
   resultMatches, chartBounds, validateAnalysisPreferences, formatAnalysisValue, analysisCardSummary,
   analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, overlaySeries, colorWithAlpha,
   comparisonDeltaClass, comparisonMetricTiles, comparisonLegendLabels,
-  plotBounds, logTicks, heatColor, drawAnalysisChart,
+  plotBounds, logTicks, niceTicks, heatColor, drawAnalysisChart, spectrumComparison, spectrogramComparison, acfComparison,
 } = require("../uwb_lab/static/analysis.js");
 
 test("experiment inputs preserve duration, integer repetitions and interval", () => {
@@ -503,4 +503,63 @@ test("spectrum, spectrogram and correlation plots render with hover readouts", (
   } finally {
     global.document = previous.document; global.window = previous.window;
   }
+});
+
+test("spectrum comparison flags a tone present in only one experiment and sizes the noise band", () => {
+  const spectrum = (scale, fs, windows, tone) => {
+    const grid = Array.from({length: 129}, (_, index) => index * fs / 256);
+    const density = grid.map((f) => 1e-5 * scale * (tone && Math.abs(f - 5) < 0.3 ? 30 : 1));
+    return {
+      status: "ok",
+      metrics: [{key: "windows", value: windows}],
+      plots: [{series: [
+        {label: "Pooled Welch PSD", x: grid, y: density},
+        {label: "95% confidence", x: grid.slice(1), y: density.slice(1).map((v) => v * 0.9), y2: density.slice(1).map((v) => v * 1.1), style: "band"},
+        {label: "Noise floor (median)", x: [grid[1], grid.at(-1)], y: [1e-5 * scale, 1e-5 * scale], dashed: true},
+      ]}],
+    };
+  };
+  const result = spectrumComparison(spectrum(1, 31.25, 130, false), spectrum(1, 31.25, 130, true), ["A", "B"]);
+  assert.ok(Math.abs(result.limit_db - 1.086) < 0.01);  // 1.96 * 4.343 * sqrt(4 / (1.89 * 130))
+  assert.ok(result.significant_pct > 0 && result.significant_pct < 15);
+  const worstIndex = result.ratio.series.find((curve) => curve.label === "B vs A").y.reduce((best, v, i, all) => v > all[best] ? i : best, 0);
+  assert.ok(Math.abs(result.ratio.series.find((curve) => curve.label === "B vs A").x[worstIndex] - 5) < 0.3);
+  assert.equal(result.bands.rows.at(-1)[0], "Total");
+  assert.ok(result.bands.rows.at(-1)[3] > 0, "B has more total power");
+  assert.match(result.summary, /Largest gap \+14\.8 dB at [45]\.\d\d Hz/);
+  const same = spectrumComparison(spectrum(1, 31.25, 130, false), spectrum(1, 31.25, 130, false));
+  assert.equal(same.significant_pct, 0);
+  // Different sample rates are compared on the overlap only, using the coarser grid.
+  const mixed = spectrumComparison(spectrum(1, 31.25, 130, false), spectrum(2, 50, 90, false));
+  assert.ok(mixed.ratio.series.at(-1).x.at(-1) <= 15.7);
+  assert.ok(Math.abs(mixed.ratio.series.find((curve) => curve.label === "B vs A").y[10] - 3.01) < 0.01);
+  assert.equal(spectrumComparison({plots: []}, spectrum(1, 31.25, 130, false)), null);
+  for (const plot of [result.overlay, result.ratio]) plotBounds(plot);
+});
+
+test("linear ticks land on round values and include zero", () => {
+  assert.deepEqual(niceTicks(-3.161, 4.006), [-2, 0, 2, 4]);
+  assert.deepEqual(niceTicks(0, 0.047), [0, 0.02, 0.04]);
+});
+
+test("spectrogram comparison shares one colour scale and acf comparison flags lag differences", () => {
+  const map = (z_min, z_max) => ({title: "Spectrogram", heatmap: {x: [1, 2], y: [1, 2], z: [[0, 1], [1, 0]], z_min, z_max, z_label: "dB", markers: []}});
+  const [a, b] = spectrogramComparison({plots: [{title: "PSD", series: []}, map(-3, 6)]}, {plots: [map(-5, 4)]});
+  assert.equal(a.heatmap.z_min, -5);
+  assert.equal(b.heatmap.z_max, 6);
+  assert.equal(a.title, "A: Spectrogram");
+  assert.equal(spectrogramComparison({plots: []}, {plots: [map(0, 1)]}), null);
+
+  const acf = (values, n) => ({plots: [{title: "Autocorrelation", series: [
+    {label: "Autocorrelation", x: values.map((v, i) => i + 1), y: values},
+    {label: "95% white-noise limit", x: values.map((v, i) => i + 1), y: values.map(() => 1.96 / Math.sqrt(n))},
+  ]}]});
+  const result = acfComparison(acf([0.02, 0.01, 0, 0, 0, 0], 1800), acf([-0.2, 0.01, 0, 0, 0, 0], 1800));
+  assert.ok(Math.abs(result.limit - 1.96 * Math.sqrt(2 / 1800)) < 1e-9);
+  assert.equal(result.differing, 1);
+  assert.equal(result.table.rows[0][4], "yes");
+  assert.equal(result.table.rows[1][4], "no");
+  assert.match(result.summary, /largest gap -0\.220 at lag 1/);
+  assert.equal(acfComparison({plots: []}, acf([0.1], 100)), null);
+  plotBounds(result.plot);
 });

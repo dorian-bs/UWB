@@ -236,6 +236,156 @@ function overlaySeries(left, right, leftLabel, rightLabel, includeFits = false) 
   ];
 }
 
+function interpolateAt(xs, ys, x) {
+  const last = xs.length - 1;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[last]) return ys[last];
+  let low = 0, high = last;
+  while (high - low > 1) {
+    const mid = (low + high) >> 1;
+    if (xs[mid] <= x) low = mid; else high = mid;
+  }
+  return ys[low] + (ys[high] - ys[low]) * (x - xs[low]) / (xs[high] - xs[low]);
+}
+
+const SPECTRUM_COMPARE_BANDS = [[0, 1], [1, 3], [3, 6], [6, 10], [10, Infinity]];
+const SPECTRUM_DOF_PER_WINDOW = 1.89;  // matches the confidence band computed by the backend
+
+// Overlay, B-over-A ratio and band-power table for two pooled spectra. Returns null when either lacks a usable spectrum.
+function spectrumComparison(left, right, labels = ["A", "B"]) {
+  const take = (result) => {
+    const series = result?.plots?.[0]?.series || [];
+    const pooled = series[0], band = series.find((curve) => curve.style === "band");
+    const floor = series.find((curve) => curve.label?.startsWith("Noise floor"));
+    if (!pooled || pooled.x.length < 4) return null;
+    const keep = pooled.x.map((value, index) => index).filter((index) => pooled.x[index] > 0);
+    const pick = (curve) => curve && {...curve, x: keep.map((index) => curve.x[index]), y: keep.map((index) => curve.y[index])};
+    return {pooled: pick(pooled), band, floor, windows: result.metrics.find((metric) => metric.key === "windows")?.value};
+  };
+  const a = take(left), b = take(right);
+  if (!a || !b) return null;
+  const low = Math.max(a.pooled.x[0], b.pooled.x[0]), high = Math.min(a.pooled.x.at(-1), b.pooled.x.at(-1));
+  const within = (curve) => curve.x.filter((value) => value >= low && value <= high);
+  const gridA = within(a.pooled), gridB = within(b.pooled);
+  const grid = gridA.length <= gridB.length ? gridA : gridB;
+  if (grid.length < 3) return null;
+  const valuesA = grid.map((f) => interpolateAt(a.pooled.x, a.pooled.y, f));
+  const valuesB = grid.map((f) => interpolateAt(b.pooled.x, b.pooled.y, f));
+  const ratio = valuesA.map((value, index) => value > 0 && valuesB[index] > 0 ? 10 * Math.log10(valuesB[index] / value) : 0);
+  const sigma = a.windows > 0 && b.windows > 0
+    ? (10 / Math.LN10) * Math.sqrt(2 / (SPECTRUM_DOF_PER_WINDOW * a.windows) + 2 / (SPECTRUM_DOF_PER_WINDOW * b.windows))
+    : null;
+  const limit = sigma === null ? null : 1.96 * sigma;
+  const colors = ["#4fb3d1", "#ff8a5c"];
+  const styled = (side, index) => {
+    const name = labels[index];
+    const out = [{...side.pooled, label: `${name}: pooled`, color: colors[index], width: 2.2}];
+    if (side.band) out.unshift({...side.band, label: `${name}: 95% confidence`, color: colors[index], alpha: 0.22, legend: false});
+    if (side.floor) out.push({...side.floor, label: `${name}: noise floor`, color: colors[index], alpha: 0.9, dashed: true, legend: false});
+    return out;
+  };
+  const overlay = {
+    title: "Spectrum overlay", x_label: "Frequency (Hz)", y_label: "PSD (m^2/Hz)", x_scale: "log", y_scale: "log",
+    series: [...styled(a, 0), ...styled(b, 1)], annotations: [],
+  };
+  const significant = limit === null ? [] : grid.map((f, index) => index).filter((index) => Math.abs(ratio[index]) > limit);
+  const ratioSeries = [];
+  if (limit !== null) {
+    ratioSeries.push({label: "No significant difference", x: grid, y: grid.map(() => -limit), y2: grid.map(() => limit),
+      style: "band", color: "#8a9893", alpha: 0.3, legend: false});
+  }
+  ratioSeries.push({label: "0 dB", x: [grid[0], grid.at(-1)], y: [0, 0], color: "#8a9893", dashed: true, legend: false});
+  ratioSeries.push({label: `${labels[1]} vs ${labels[0]}`, x: grid, y: ratio, color: "#e0a73a", width: 1.8});
+  if (significant.length) {
+    ratioSeries.push({label: "Significant", x: significant.map((index) => grid[index]), y: significant.map((index) => ratio[index]),
+      style: "points", color: "#ff6b72"});
+  }
+  const ratioPlot = {
+    title: `Where ${labels[1]} differs from ${labels[0]}`, x_label: "Frequency (Hz)", y_label: `${labels[1]} / ${labels[0]} (dB)`,
+    x_scale: "log", series: ratioSeries, annotations: [],
+  };
+  const step = (grid.at(-1) - grid[0]) / (grid.length - 1);
+  const power = (values, from, to) => values.reduce((sum, value, index) => sum + (grid[index] >= from && grid[index] < to ? value * step : 0), 0) * 1e6;
+  const edges = [...SPECTRUM_COMPARE_BANDS, [0, Infinity]];
+  const rows = edges.map(([from, to], index) => {
+    const total = index === edges.length - 1;
+    if (!total && !grid.some((f) => f >= from && f < to)) return null;
+    const powerA = power(valuesA, from, to), powerB = power(valuesB, from, to);
+    const name = total ? "Total" : to === Infinity ? `> ${from} Hz` : from === 0 ? `< ${to} Hz` : `${from}-${to} Hz`;
+    return [name, powerA, powerB, powerA > 0 && powerB > 0 ? 10 * Math.log10(powerB / powerA) : null];
+  }).filter(Boolean);
+  const total = rows.at(-1);
+  let worst = 0;
+  ratio.forEach((value, index) => { if (Math.abs(value) > Math.abs(ratio[worst])) worst = index; });
+  const share = limit === null ? null : significant.length / grid.length * 100;
+  const sign = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+  const summary = `${labels[1]} carries ${sign(total[3] ?? 0)} dB total power vs ${labels[0]} (${grid[0].toFixed(2)}-${grid.at(-1).toFixed(1)} Hz). ` +
+    (share === null ? "" : `${share.toFixed(0)}% of frequency bins differ beyond the 95% noise band. `) +
+    `Largest gap ${sign(ratio[worst])} dB at ${grid[worst].toFixed(2)} Hz.`;
+  return {
+    overlay, ratio: ratioPlot, summary, significant_pct: share, limit_db: limit,
+    bands: {columns: ["Band", `${labels[0]} (mm²)`, `${labels[1]} (mm²)`, `${labels[1]} vs ${labels[0]} (dB)`], rows},
+  };
+}
+
+const COMPARE_COLORS = ["#4fb3d1", "#ff8a5c"];
+
+// Both spectrograms share one colour scale so equal colours mean equal dB over each batch's own median level.
+function spectrogramComparison(left, right, labels = ["A", "B"]) {
+  const maps = [left, right].map((result) => result?.plots?.find((plot) => plot.heatmap));
+  if (!maps[0] || !maps[1]) return null;
+  const min = Math.min(maps[0].heatmap.z_min, maps[1].heatmap.z_min);
+  const max = Math.max(maps[0].heatmap.z_max, maps[1].heatmap.z_max);
+  return maps.map((plot, index) => ({
+    ...plot, title: `${labels[index]}: ${plot.title}`, heatmap: {...plot.heatmap, z_min: min, z_max: max},
+  }));
+}
+
+// Two autocorrelation curves compared lag by lag. The difference of two independent estimates has
+// standard deviation sqrt(1/nA + 1/nB); each white-noise limit 1.96/sqrt(n) gives that n.
+function acfComparison(left, right, labels = ["A", "B"]) {
+  const take = (result) => {
+    const plot = result?.plots?.find((item) => item.title === "Autocorrelation");
+    const curve = plot?.series.find((item) => item.label === "Autocorrelation");
+    const limit = plot?.series.find((item) => item.label?.includes("white-noise limit"))?.y[0];
+    return curve && curve.x.length ? {lags: curve.x, values: curve.y, limit} : null;
+  };
+  const a = take(left), b = take(right);
+  if (!a || !b) return null;
+  const count = Math.min(a.lags.length, b.lags.length);
+  const lags = a.lags.slice(0, count), sides = [a, b];
+  const series = [];
+  sides.forEach((side, index) => {
+    const color = COMPARE_COLORS[index], name = labels[index];
+    series.push({label: name, x: lags, y: side.values.slice(0, count), color, width: 1.8});
+    series.push({label: `${name}: lags`, x: lags, y: side.values.slice(0, count), style: "points", color, legend: false});
+    if (side.limit > 0) {
+      series.push({label: `${name}: 95% white-noise limit`, x: lags, y: lags.map(() => side.limit), color, alpha: 0.7, dashed: true, legend: false});
+      series.push({label: `${name}: lower limit`, x: lags, y: lags.map(() => -side.limit), color, alpha: 0.7, dashed: true, legend: false});
+    }
+  });
+  const plot = {title: "Autocorrelation", x_label: "Lag (samples)", y_label: "Autocorrelation", series, annotations: []};
+  const sigma = a.limit > 0 && b.limit > 0 ? Math.sqrt((a.limit / 1.96) ** 2 + (b.limit / 1.96) ** 2) : null;
+  const difference = lags.map((lag, index) => b.values[index] - a.values[index]);
+  const differing = sigma === null ? [] : difference.map((value, index) => index).filter((index) => Math.abs(difference[index]) > 1.96 * sigma);
+  const sign = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
+  let worst = 0;
+  difference.forEach((value, index) => { if (Math.abs(value) > Math.abs(difference[worst])) worst = index; });
+  const outside = (side) => side.values.slice(0, count).filter((value) => side.limit > 0 && Math.abs(value) > side.limit).length;
+  const summary = `Lag 1: ${labels[0]} ${sign(a.values[0])}, ${labels[1]} ${sign(b.values[0])}. ` +
+    `${labels[0]} has ${outside(a)} and ${labels[1]} ${outside(b)} of ${count} lags outside the white-noise limit. ` +
+    (sigma === null ? "" : `${differing.length} of ${count} lags differ beyond the 95% noise band; `) +
+    `largest gap ${sign(difference[worst])} at lag ${lags[worst]}.`;
+  const rows = lags.slice(0, 5).map((lag, index) => [
+    lag, a.values[index], b.values[index], difference[index],
+    sigma === null ? null : (Math.abs(difference[index]) > 1.96 * sigma ? "yes" : "no"),
+  ]);
+  return {
+    plot, summary, differing: differing.length, limit: sigma === null ? null : 1.96 * sigma,
+    table: {columns: ["Lag", labels[0], labels[1], `${labels[1]} - ${labels[0]}`, "Beyond noise band"], rows},
+  };
+}
+
 function resultMatches(selection, job) {
   return selection.jobId === job.job_id && selection.recipeKey === job.recipe_key;
 }
@@ -300,6 +450,18 @@ function logTicks(min, max, maxSpan) {
       const tick = exponent + Math.log10(mantissa);
       if (tick >= min - 1e-9 && tick <= max + 1e-9) ticks.push(tick);
     }
+  }
+  return ticks;
+}
+
+// Round linear ticks (1, 2 or 5 times a power of ten) so zero and simple values land on gridlines.
+function niceTicks(min, max, target = 5) {
+  const rough = (max - min) / Math.max(1, target - 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 5, 10].map((factor) => factor * magnitude).find((value) => value >= rough);
+  const ticks = [];
+  for (let tick = Math.ceil(min / step - 1e-9) * step; tick <= max + step * 1e-9; tick += step) {
+    ticks.push(Math.abs(tick) < step * 1e-9 ? 0 : Number(tick.toPrecision(12)));
   }
   return ticks;
 }
@@ -457,7 +619,7 @@ function drawAnalysisChart(canvas, plot, hover = null) {
   context.font = "10px system-ui"; context.lineWidth = 1;
   const ticks = (axis, log, maxSpan) => log
     ? logTicks(axis.min, axis.max, maxSpan)
-    : Array.from({length: 5}, (_, tick) => axis.min + tick * (axis.max - axis.min) / 4);
+    : niceTicks(axis.min, axis.max);
   const gridX = (tick) => area.left + (tick - bounds.x.min) / (bounds.x.max - bounds.x.min) * (area.right - area.left);
   const gridY = (tick) => area.bottom - (tick - bounds.y.min) / (bounds.y.max - bounds.y.min) * (area.bottom - area.top);
   for (const tick of ticks(bounds.y, logY, 2)) {
@@ -707,8 +869,83 @@ function startAnalysisPanel({request, showError}) {
       cardsList.push(card);
       nextPlots.push({canvas, plot});
     }
+    const psdLeft = primaryOutput.results.find((item) => item.method === "psd")?.result;
+    const psdRight = secondaryOutput.results.find((item) => item.method === "psd")?.result;
+    const spectra = psdLeft?.status === "ok" && psdRight?.status === "ok" ? spectrumComparison(psdLeft, psdRight) : null;
+    if (spectra) {
+      const card = node("article", null, "analysis-card");
+      card.dataset.method = "psd";
+      const header = node("header", null, "analysis-card-header");
+      const title = node("div", null, "analysis-card-title");
+      title.append(node("h3", "Noise spectrum comparison"));
+      header.append(title); card.append(header);
+      card.append(node("p", spectra.summary, "plot-note"));
+      const tiles = node("dl", null, "analysis-metrics");
+      const spectrumMetrics = (result) => analysisCardSummary("psd", result.metrics).metrics;
+      comparisonMetricTiles(spectrumMetrics(psdLeft), spectrumMetrics(psdRight)).forEach(({key, label, left, right, delta, trend}) => {
+        const tile = node("div", null, `metric-tile metric-tile--comparison metric-tile--${trend}`);
+        tile.dataset.key = key;
+        tile.append(node("dt", label));
+        const value = node("dd", null, "metric-value");
+        value.append(node("strong", right));
+        tile.append(value, node("p", `A ${left} → B ${right} (Δ ${delta})`, "plot-note"));
+        tiles.append(tile);
+      });
+      card.append(tiles);
+      card.append(node("p", `A = ${primaryLabel}; B = ${secondaryLabel}`, "plot-note"));
+      for (const plot of [spectra.ratio, spectra.overlay]) {
+        const canvas = node("canvas", null, "plot-tall");
+        canvas.setAttribute("aria-label", `${plot.title}: ${plot.x_label}; ${plot.y_label}`);
+        const key = `compare:${plot.title}`, fold = node("details", null, "analysis-method-details analysis-plot");
+        fold.open = plotOpen.has(key) ? plotOpen.get(key) : true;
+        fold.addEventListener("toggle", () => {
+          plotOpen.set(key, fold.open);
+          if (fold.open) drawAnalysisChart(canvas, plot);
+        });
+        fold.append(node("summary", plot.title), canvas);
+        card.append(fold);
+        nextPlots.push({canvas, plot});
+      }
+      card.append(node("p", "Power by frequency band", "plot-title"), table(spectra.bands.columns, spectra.bands.rows));
+      const note = spectra.limit_db === null ? "" : `The grey band is the 95% range of ±${spectra.limit_db.toFixed(2)} dB expected from estimation noise alone; red points fall outside it.`;
+      if (note) card.append(node("p", note, "plot-note"));
+      const addFold = (title, content, canvases) => {
+        const key = `compare:${title}`, fold = node("details", null, "analysis-method-details analysis-plot");
+        fold.open = plotOpen.has(key) ? plotOpen.get(key) : false;
+        fold.addEventListener("toggle", () => {
+          plotOpen.set(key, fold.open);
+          if (fold.open) canvases.forEach(({canvas, plot}) => drawAnalysisChart(canvas, plot));
+        });
+        fold.append(node("summary", title), ...content);
+        card.append(fold);
+        nextPlots.push(...canvases);
+      };
+      const spectrograms = spectrogramComparison(psdLeft, psdRight);
+      if (spectrograms) {
+        const canvases = spectrograms.map((plot) => {
+          const canvas = node("canvas", null, "plot-tall");
+          canvas.setAttribute("aria-label", `${plot.title}: ${plot.x_label}; ${plot.y_label}`);
+          return {canvas, plot};
+        });
+        const content = [];
+        canvases.forEach(({canvas, plot}, index) => content.push(node("p", `${index ? "B" : "A"} = ${index ? secondaryLabel : primaryLabel}`, "plot-note"), canvas));
+        content.push(node("p", "Both use one colour scale; each is in dB over its own median level, so this compares structure over time, not absolute power.", "plot-note"));
+        addFold("Spectrogram comparison", content, canvases);
+      }
+      const acf = acfComparison(psdLeft, psdRight);
+      if (acf) {
+        const canvas = node("canvas", null, "plot-tall");
+        canvas.setAttribute("aria-label", `${acf.plot.title}: ${acf.plot.x_label}; ${acf.plot.y_label}`);
+        const content = [node("p", acf.summary, "plot-note"), canvas, table(acf.table.columns, acf.table.rows)];
+        if (acf.limit !== null) {
+          content.push(node("p", `Dashed lines are each batch's own 95% white-noise limit. A and B differ at a lag only if they are more than ${acf.limit.toFixed(3)} apart.`, "plot-note"));
+        }
+        addFold("Autocorrelation comparison", content, [{canvas, plot: acf.plot}]);
+      }
+      cardsList.push(card);
+    }
     if (!cardsList.length) {
-      cardsList.push(node("p", "Comparison needs both statistics and distribution results for the selected batches.", "plot-note"));
+      cardsList.push(node("p", "Comparison needs statistics, distribution or spectrum results for the selected batches.", "plot-note"));
     }
     cardsNode.replaceChildren(...cardsList);
     plots = nextPlots;
@@ -1063,6 +1300,6 @@ function startAnalysisPanel({request, showError}) {
 
 if (typeof module !== "undefined") module.exports = {
   validateAnalysisPreferences, resultMatches, chartBounds, formatAnalysisValue, analysisCardSummary,
-  plotBounds, logTicks, heatColor, drawAnalysisChart, analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, comparisonMetricTiles,
-  overlaySeries, colorWithAlpha, comparisonDeltaClass, comparisonLegendLabels,
+  plotBounds, logTicks, niceTicks, heatColor, drawAnalysisChart, analysisSourceSummary, analysisLegendLabels, comparisonMetricRows, comparisonMetricTiles,
+  overlaySeries, spectrumComparison, spectrogramComparison, acfComparison, colorWithAlpha, comparisonDeltaClass, comparisonLegendLabels,
 };

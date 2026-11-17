@@ -182,6 +182,16 @@ The UART to the ESP32 is decoupled from USB: it copies one whole line at a time 
 lines while busy (`uart_skip`, `uart_skip_json`; a JSON record waits behind a text line but is
 skipped behind another JSON). USB CDC receives every queued line.
 
+**Radio IRQ robustness.** The DW3000 IRQ is level-high but the STM32 EXTI is edge-triggered, so a
+missed edge once left the responder deaf: the initiator kept timing out
+(`[IRQ][board 1] timeout, status=0x00020000`), the responder printed nothing, and the host saw
+only debug lines. `qorvo_irq_service()` now re-runs `dwt_isr()` while the pin is still high, and
+`qorvo_link_watchdog()` (main loop) recovers the remaining cases: IRQ stuck high for 2 ms is
+serviced, a TX exchange open for 100 ms is reset, and an RX board with no radio interrupt for
+max(1 s, 4 periods) is re-armed. Each recovery logs `[WDG]…` (rate-limited) and is counted in the
+diag line as `wdg_irq`, `wdg_rx`, `wdg_tx`. The host `/api/status` adds `stalled` (connected, but
+no range record for 5 s) and `recent_ignored` (last five non-JSON lines) to make a stall visible.
+
 `SET` requires a paused board. Firmware periods: 10-10000 ms; the host guard is 20-10000 ms (50 Hz),
 the highest rate measured with ≥97% yield; channels: 5/9;
 preambles: 64/128/256/512/1024; rates: 850/6800 kbps.

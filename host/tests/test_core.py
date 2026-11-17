@@ -72,6 +72,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(state.last_diag["wall_ms"], 1800)
         self.assertEqual((state.malformed_lines, state.ignored_lines, state.total_samples), (0, 0, 0))
 
+    def test_keeps_recent_ignored_lines_and_last_sample_time(self) -> None:
+        state = LabState()
+        for i in range(7):
+            state.add_line(f"[IRQ][board 1] timeout, total={i}")
+        self.assertEqual(len(state.recent_ignored), 5)
+        self.assertTrue(state.recent_ignored[-1].endswith("total=6"))
+        self.assertIsNone(state.last_sample_monotonic)
+        state.add_line(VALID_LINE)
+        self.assertIsNotNone(state.last_sample_monotonic)
+
     def test_parses_firmware_range_message_v2(self) -> None:
         sample = parse_range_line(VALID_LINE_V2)
         self.assertIsNotNone(sample)

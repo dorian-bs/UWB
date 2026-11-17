@@ -168,6 +168,12 @@ class Runtime:
             "exchange_success_pct": self.exchange_quality.success_pct(),
         }
 
+    def stalled(self) -> bool:
+        """Link is up and lines keep arriving, but no range record has for a while."""
+        if not self.connected or self.state.last_sample_monotonic is None:
+            return False
+        return time.monotonic() - self.state.last_sample_monotonic > STALL_AFTER_S
+
     def status(self) -> dict[str, Any]:
         if self.radio:
             self.calibration.check_boards(self.radio)
@@ -180,6 +186,8 @@ class Runtime:
             "ignored_lines": self.state.ignored_lines,
             "malformed_lines": self.state.malformed_lines,
             "sequence_gaps": self.state.sequence_gaps,
+            "stalled": self.stalled(),
+            "recent_ignored": list(self.state.recent_ignored),
             "recording": self.recorder.active,
             "session": self.recorder.session_dir.name if self.recorder.session_dir else None,
             "prior": self.state.prior.to_dict() if self.state.prior else None,
@@ -190,6 +198,8 @@ class Runtime:
             "calibration": self.calibration.status(),
         }
 
+
+STALL_AFTER_S = 5.0
 
 runtime = Runtime()
 

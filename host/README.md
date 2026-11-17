@@ -144,7 +144,7 @@ independence between runs.
 | --- | --- |
 | Statistics | Count, signed bias, sample standard deviation, RMSE, P95 absolute error |
 | Histogram + Gaussian | Residual density and a single-Gaussian baseline |
-| Spectrum | Log-log PSD (95% band, per-run lines, noise floor), spectrogram and autocorrelation; tone/wander/flatness metrics; Welch for regular timing, gap-aware Lomb-Scargle windows for jitter/gaps |
+| Spectrum | Log-log PSD (95% band, per-run lines, noise floor), spectrogram and autocorrelation; tone/wander/flatness metrics; Welch for regular timing, gap-aware Lomb-Scargle windows for jitter/gaps. Comparing two batches adds a "Noise spectrum comparison" card: B/A ratio in dB with a 95% estimation-noise band, overlaid spectra, power per frequency band, both spectrograms on one colour scale and an autocorrelation overlay with a per-lag difference test |
 | Gaussian mixture | A user-chosen 1-6-component fit, with weights, means, spreads, AIC/BIC |
 
 All methods use **every eligible recorded individual sample** in the selection,

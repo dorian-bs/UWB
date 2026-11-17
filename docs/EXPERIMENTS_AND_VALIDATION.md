@@ -62,6 +62,16 @@ source fingerprint, outcomes, prior references, seed and library versions.
 | GMM (fit option) | 1-6 components, fixed seed, five initializations, maximum 500 iterations, covariance regularization `1e-10 m²`; convergence, weights/means/spreads |
 | Spectrum | Pooled PSD density (m²/Hz) with 95% band, per-run lines and noise floor; spectrogram over the recorded time; autocorrelation (lags 1-20, ±1.96/√N). Uses every recorded run of the batch regardless of scope |
 
+Spectrum comparison (browser-side, from the two batches' pooled PSD results): both
+spectra are interpolated onto the coarser frequency grid over their overlapping range and
+shown as an overlay and as a B/A ratio in dB. The grey band is the 95% range expected from
+estimation noise alone, `1.96·(10/ln10)·sqrt(2/(1.89·nA) + 2/(1.89·nB))` dB for `n` averaged
+windows; bins outside it are marked. It assumes independent bins, so about 5% of bins fall
+outside by chance. A band table gives power in mm² for A, B and the dB difference. The two spectrograms are drawn on one colour scale (each is still dB over its own median
+level, so it compares structure, not absolute power). The autocorrelation overlay tests each
+lag with `|rhoB - rhoA| > 1.96·sqrt(1/nA + 1/nB)`, where `n = (1.96/limit)²` is recovered from each
+batch's white-noise limit. A batch with too few samples for a spectrum produces no spectrum comparison.
+
 Spectrum metrics: dominant tone (Hz), its excess over the median floor (dB),
 power share within ±2 bins, share of windows with a >12 dB narrowband peak,
 tone wander (std of the per-window peak frequency among tonal windows, ≥3),

@@ -15,7 +15,7 @@ the noise before adding more models.
 | Dashboard | Two configurable signal plots, pause-view, display preferences, connection/recording health; residual and rolling bias keep equal-width signs (including rounded zero) to prevent sign-change jitter |
 | Radio | Coordinated dual-USB rate/channel/preamble/data-rate/TX-power changes, readback and rollback |
 | Experiments | Host-scheduled repeated timed runs and intervals; separate recordings and incomplete/interrupted outcomes |
-| Analysis | Five core residual statistics, histogram with a selectable distribution fit (Gaussian, GMM, shifted log-normal, Student-t, Laplace, skew-normal) and model comparison, noise spectrum pooled over all runs of the batch: log-log PSD with confidence band and per-run lines, spectrogram, autocorrelation, tone/wander metrics; Welch or gap-aware windowed Lomb-Scargle PSD with a grid fixed by the longest run (`noise-7`) |
+| Analysis | Five core residual statistics, histogram with a selectable distribution fit (Gaussian, GMM, shifted log-normal, Student-t, Laplace, skew-normal) and model comparison, noise spectrum pooled over all runs of the batch: log-log PSD with confidence band and per-run lines, spectrogram, autocorrelation, tone/wander metrics; Welch or gap-aware windowed Lomb-Scargle PSD with a grid fixed by the longest run (`noise-7`); batch comparison adds a spectrum card (overlay, B/A dB ratio with 95% noise band, power per frequency band, spectrograms on a shared colour scale, autocorrelation overlay with a lag-by-lag difference test) |
 | Noise modelling | `notebooks/uwb_noise_modelling.ipynb` (staged: anatomy, A/A noise floor, factor effects with run-level cluster-permutation/bootstrap tests, distribution shape, diagnostics, model scoreboard, generative sampler) on `uwb_lab.noise_data`/`noise_stats`/`noise_models`; condition labels in editable `notebooks/conditions.csv`; needs `pip install -e "host[notebook]"` |
 | Calibration | Host-verified dual-USB fixed-LOS capture, evaluated antenna-delay preview/apply, readback/rollback and saved audit; runtime-only |
 | Development | Hardware-free Python/API, Node UI, and native C harness tests; thin setup/build/flash wrappers |
@@ -46,6 +46,10 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   platform roadmap. Old design/implementation notes are historical, not requirements.
 
 ## Known limitations
+
+- Responder stall fix (IRQ re-service loop + link watchdog, see ARCHITECTURE) is built and
+  compile-checked but not yet flashed or soaked on the boards; until flashed, a stalled board is
+  only cleared by RESUME/reset. Confirm with a long run that `wdg_*` counters stay at 0 or recover.
 
 - Noise modelling: re-mounting/re-rotating antennas shifts the bias by centimetres between
   replicate batches, while unrotated restarts agree to ~1 mm, so orientation effects need

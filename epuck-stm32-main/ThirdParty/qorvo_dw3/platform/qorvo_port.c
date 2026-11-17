@@ -107,9 +107,14 @@ void qorvo_diag_isr_enter(void)
     g_diag.in_isr = true;
 }
 
+/* Not cleared by DIAG: the link watchdog uses it to tell whether the radio IRQ is alive. */
+static volatile uint32_t g_irq_serviced = 0U;
+
 void qorvo_diag_isr_exit(void)
 {
     uint32_t cycles = DWT->CYCCNT - g_diag.isr_t0;
+
+    g_irq_serviced++;
 
     g_diag.in_isr = false;
     g_diag.isr_count++;
@@ -117,6 +122,22 @@ void qorvo_diag_isr_exit(void)
     if (cycles > g_diag.isr_max_cycles) {
         g_diag.isr_max_cycles = cycles;
     }
+}
+
+/*
+ * The DW3000 IRQ is level-high while any enabled status bit is set, but the EXTI is
+ * edge-triggered. An event that arrives while another is still being cleared never produces
+ * a new edge and would leave the radio deaf, so keep servicing until the line drops.
+ */
+void qorvo_irq_service(void)
+{
+    uint8_t passes = 0U;
+
+    do {
+        qorvo_diag_isr_enter();
+        dwt_isr();
+        qorvo_diag_isr_exit();
+    } while ((HAL_GPIO_ReadPin(DWM_IRQ_GPIO_Port, DWM_IRQ_Pin) == GPIO_PIN_SET) && (++passes < 4U));
 }
 
 static void qorvo_diag_note_reply_start(void)
@@ -1910,10 +1931,17 @@ void qorvo_diag_set(uint32_t flags, bool emit)
     g_link.last_tx_tick = qorvo_sched_now();
 }
 
+/* Link watchdog recoveries since boot (see qorvo_link_watchdog). */
+static struct {
+    uint32_t irq_recovered;
+    uint32_t rx_rearmed;
+    uint32_t tx_reset;
+} g_wdg;
+
 /* One compact line per second over USB only, counters since the last DIAG command. */
 static void qorvo_diag_emit(void)
 {
-    char buf[640];
+    char buf[768];
     uint32_t wall_ms = qorvo_wall_ms();
     uint32_t per_ms = qorvo_cycles_per_ms();
     uint32_t per_us = per_ms / 1000U;
@@ -1930,7 +1958,8 @@ static void qorvo_diag_emit(void)
                  "\"rx_err\":%lu,\"isr_n\":%lu,\"isr_ms\":%lu,\"isr_max_us\":%lu,"
                  "\"uart_isr_ms\":%lu,\"reply_lat_max_us\":%lu,\"exch_last_us\":%lu,"
                  "\"exch_max_us\":%lu,\"suppressed\":%lu,\"log_drop\":%lu,\"log_drop_json\":%lu,"
-                 "\"cdc_drop\":%lu,\"cdc_drop_json\":%lu,\"uart_skip\":%lu,\"uart_skip_json\":%lu}\r\n",
+                 "\"cdc_drop\":%lu,\"cdc_drop_json\":%lu,\"uart_skip\":%lu,\"uart_skip_json\":%lu,"
+                 "\"wdg_irq\":%lu,\"wdg_rx\":%lu,\"wdg_tx\":%lu}\r\n",
                  g_link.board_id,
                  (g_link.role == QORVO_ROLE_TX) ? "tx" : "rx",
                  (unsigned long)g_diag.flags,
@@ -1956,10 +1985,104 @@ static void qorvo_diag_emit(void)
                  (unsigned long)qorvo_log_stats()->cdc_drop,
                  (unsigned long)qorvo_log_stats()->cdc_drop_json,
                  (unsigned long)qorvo_log_stats()->uart_skip,
-                 (unsigned long)qorvo_log_stats()->uart_skip_json);
+                 (unsigned long)qorvo_log_stats()->uart_skip_json,
+                 (unsigned long)g_wdg.irq_recovered,
+                 (unsigned long)g_wdg.rx_rearmed,
+                 (unsigned long)g_wdg.tx_reset);
     if ((n > 0) && ((size_t)n < sizeof(buf)) &&
         (CDC_Transmit_FS((uint8_t *)buf, (uint16_t)n) == USBD_OK)) {
         g_diag_last_emit_ms = wall_ms;
+    }
+}
+
+/* Link watchdog: the radio IRQ is edge-triggered, so a missed edge, a radio that silently
+ * stopped receiving or an exchange whose callback never came must not stall ranging for good. */
+#define QORVO_WDG_IRQ_STUCK_MS      2U
+#define QORVO_WDG_RX_SILENCE_MIN_MS 1000U
+#define QORVO_WDG_TX_EXCHANGE_MS    100U
+#define QORVO_WDG_LOG_MS            1000U
+
+static void qorvo_wdg_log(uint32_t wall_ms, const char *what)
+{
+    static uint32_t last_log_ms;
+    static bool logged;
+
+    if (!logged || ((wall_ms - last_log_ms) >= QORVO_WDG_LOG_MS)) {
+        logged = true;
+        last_log_ms = wall_ms;
+        qorvo_log_printf("[WDG][board %u] %s (irq=%lu rx=%lu tx=%lu)\r\n",
+                         g_link.board_id, what,
+                         (unsigned long)g_wdg.irq_recovered,
+                         (unsigned long)g_wdg.rx_rearmed,
+                         (unsigned long)g_wdg.tx_reset);
+    }
+}
+
+static void qorvo_link_watchdog(uint32_t wall_ms)
+{
+    static bool irq_high;
+    static uint32_t irq_high_since;
+    static uint32_t seen_serviced;
+    static uint32_t last_activity_ms;
+    const qorvo_radio_state_t *radio = qorvo_control_state();
+    bool high = (HAL_GPIO_ReadPin(DWM_IRQ_GPIO_Port, DWM_IRQ_Pin) == GPIO_PIN_SET);
+    uint32_t silence_ms;
+
+    if (g_irq_serviced != seen_serviced) {
+        seen_serviced = g_irq_serviced;
+        last_activity_ms = wall_ms;
+    }
+    if (!radio->running) {
+        irq_high = false;
+        last_activity_ms = wall_ms;
+        return;
+    }
+
+    if (!high) {
+        irq_high = false;
+    } else if (!irq_high) {
+        irq_high = true;
+        irq_high_since = wall_ms;
+    } else if ((wall_ms - irq_high_since) >= QORVO_WDG_IRQ_STUCK_MS) {
+        irq_high = false;
+        g_wdg.irq_recovered++;
+        HAL_NVIC_DisableIRQ(DWM_IRQ_EXTI_IRQn);
+        qorvo_irq_service();
+        __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
+        HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
+        HAL_NVIC_EnableIRQ(DWM_IRQ_EXTI_IRQn);
+        qorvo_wdg_log(wall_ms, "IRQ line stuck high, serviced");
+    }
+
+    if ((g_link.role == QORVO_ROLE_TX) &&
+        ((g_link.state != QORVO_STATE_IDLE) || (g_link.tx_busy != 0U)) &&
+        ((qorvo_sched_now() - g_link.last_tx_tick) >= QORVO_WDG_TX_EXCHANGE_MS)) {
+        g_wdg.tx_reset++;
+        HAL_NVIC_DisableIRQ(DWM_IRQ_EXTI_IRQn);
+        dwt_forcetrxoff();
+        qorvo_clear_status_events();
+        __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
+        HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
+        g_link.state = QORVO_STATE_IDLE;
+        g_link.last_tx_msg = QORVO_TXMSG_NONE;
+        g_link.tx_busy = 0U;
+        HAL_NVIC_EnableIRQ(DWM_IRQ_EXTI_IRQn);
+        qorvo_wdg_log(wall_ms, "TX exchange never completed, reset");
+    }
+
+    silence_ms = 4U * radio->period_ms;
+    if (silence_ms < QORVO_WDG_RX_SILENCE_MIN_MS) {
+        silence_ms = QORVO_WDG_RX_SILENCE_MIN_MS;
+    }
+    if ((g_link.role == QORVO_ROLE_RX) && ((wall_ms - last_activity_ms) >= silence_ms)) {
+        last_activity_ms = wall_ms;
+        g_wdg.rx_rearmed++;
+        HAL_NVIC_DisableIRQ(DWM_IRQ_EXTI_IRQn);
+        qorvo_enter_idle_rx();
+        __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
+        HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
+        HAL_NVIC_EnableIRQ(DWM_IRQ_EXTI_IRQn);
+        qorvo_wdg_log(wall_ms, "no radio activity, RX re-armed");
     }
 }
 
@@ -1976,6 +2099,7 @@ void qorvo_link_process(void)
     qorvo_log_drain(qorvo_wall_ms());
     qorvo_usb_control_process();
     qorvo_diag_emit();
+    qorvo_link_watchdog(qorvo_wall_ms());
     if (!qorvo_control_state()->running) {
         return;
     }
