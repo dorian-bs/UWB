@@ -53,6 +53,13 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(parse_range_line("ds_twr.distance = 2.1 m"))
         self.assertIsNone(parse_range_line('{"type":"range","v":2}'))
 
+    def test_diag_lines_are_kept_apart_from_samples_and_malformed_counts(self) -> None:
+        state = LabState()
+        line = '{"type":"diag","v":1,"board":1,"role":"tx","tick_ms":1000,"wall_ms":1800}'
+        self.assertIsNone(state.add_line(line))
+        self.assertEqual(state.last_diag["wall_ms"], 1800)
+        self.assertEqual((state.malformed_lines, state.ignored_lines, state.total_samples), (0, 0, 0))
+
     def test_parses_firmware_range_message_v2(self) -> None:
         sample = parse_range_line(VALID_LINE_V2)
         self.assertIsNotNone(sample)

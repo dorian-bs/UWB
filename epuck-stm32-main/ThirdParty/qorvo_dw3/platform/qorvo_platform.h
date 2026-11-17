@@ -41,6 +41,8 @@ int32_t qorvo_link_init(uint8_t board_id, qorvo_role_t role);
 void qorvo_link_process(void);
 void qorvo_usb_control_receive(const uint8_t *data, uint32_t len);
 void qorvo_usb_control_process(void);
+void qorvo_diag_isr_enter(void);
+void qorvo_diag_isr_exit(void);
 void qorvo_usb_control_lifecycle(bool connected);
 
 /* -------------------------------------------------------------------------- */

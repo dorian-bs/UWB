@@ -16,6 +16,7 @@ the noise before adding more models.
 | Radio | Coordinated dual-USB rate/channel/preamble/data-rate/TX-power changes, readback and rollback |
 | Experiments | Host-scheduled repeated timed runs and intervals; separate recordings and incomplete/interrupted outcomes |
 | Analysis | Five core residual statistics, histogram with a selectable distribution fit (Gaussian, GMM, shifted log-normal, Student-t, Laplace, skew-normal) and model comparison, Welch or gap-aware Lomb-Scargle spectrum pooled over all runs of the batch |
+| Noise modelling | `notebooks/uwb_noise_modelling.ipynb` (staged: anatomy, A/A noise floor, factor effects with run-level cluster-permutation/bootstrap tests, distribution shape, diagnostics, model scoreboard, generative sampler) on `uwb_lab.noise_data`/`noise_stats`/`noise_models`; condition labels in editable `notebooks/conditions.csv`; needs `pip install -e "host[notebook]"` |
 | Calibration | Host-verified dual-USB fixed-LOS capture, evaluated antenna-delay preview/apply, readback/rollback and saved audit; runtime-only |
 | Development | Hardware-free Python/API, Node UI, and native C harness tests; thin setup/build/flash wrappers |
 
@@ -46,10 +47,33 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
 
 ## Known limitations
 
+- Noise modelling: re-mounting/re-rotating antennas shifts the bias by centimetres between
+  replicate batches, while unrotated restarts agree to ~1 mm, so orientation effects need
+  replicate batches before they are credible. Held-out-batch prediction is currently best with a
+  global Student-t; condition-aware models do not yet beat it. The notebook's backlog lists next steps.
+
 - This pass does not build, flash, or revalidate boards. The complete hardware
   chain and any changed RF settings still need explicit lab validation.
 - Ranging defaults to roughly 1 Hz for bring-up. The 0.1-10 Hz command guard is
   not verified throughput or an accuracy claim.
+- Sample loss at 10 Hz (~55% yield): recordings show contiguous `seq` and
+  `telemetry_dropped` 0, so exchanges succeed but start too rarely. Firmware `time_ms`
+  runs ~0.55x wall time at 100 ms: blocking 115200-baud UART debug prints inside the
+  DW3000 interrupt (~1.1 KB/exchange, ~80 ms) starve SysTick, which also paces TX.
+  Yield is roughly p/(p+80 ms). Diagnostic firmware (`DIAG`, see ARCHITECTURE.md) plus
+  `make probe-loss` test this A/B. Hardware run (100 ms): baseline 55.7% yield (tick/wall 0.56,
+  ~80 ms lost per poll); quiet ISR logs on both boards 98%; all fixes 100%; wall-clock
+  scheduling alone 99.7% but ISR duty 81%; quiet on TX only 0% (RX reply latency 12 ms
+  exceeds the TX receive timeout, 316 timeouts); quiet on RX only 98%. Baseline yield is
+  71% at 200 ms and 87% at 500 ms. Confirmed. Fix implemented, not yet flashed or measured:
+  `qorvo_log.c` queues every log line (4 KB ring) and the main loop drains it, JSON range
+  records get a reserved share and a longer USB wait, debug text is dropped first when full
+  (`log_drop`); TX is scheduled from the DWT cycle counter. `DIAG` flags now re-enable the old
+  behaviour for A/B (1 legacy log, 2 legacy tick, 4 mute text). Verify after flashing with
+  `make probe-loss`: expect ~100% yield at 100/200/500 ms for the default and ~55% for
+  legacy log + tick. Still open: ANSWER/FINAL use immediate TX against a 12 ms RX timeout, so
+  check `rx_reply_latency_max_ms`; the UART at 115200 baud cannot carry ~1.2 KB/exchange of
+  debug text at 10 Hz, so some debug lines are dropped by design.
 - Only the initiator publishes ranges. Debug text and JSON share output; full
   CIR snapshots, boot IDs, and firmware build identity are still not recorded.
 - Transport is not fully loss-aware. Parsed recordings cannot recover upstream

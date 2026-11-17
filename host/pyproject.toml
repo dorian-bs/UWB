@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["httpx>=0.28,<1", "pytest>=8,<9", "ruff>=0.9,<1"]
-notebook = ["ipykernel>=6", "pandas>=2,<4", "plotly>=5,<7"]
+notebook = ["ipykernel>=6", "matplotlib>=3.8,<4", "pandas>=2,<4", "plotly>=5,<7"]
 
 [project.scripts]
 uwb-lab = "uwb_lab.__main__:main"

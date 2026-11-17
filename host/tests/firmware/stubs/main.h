@@ -3,6 +3,7 @@
 #include <stdint.h>
 typedef struct { int unused; } UART_HandleTypeDef;
 #define HAL_MAX_DELAY UINT32_MAX
+#define HAL_OK 0
 #define DWM_RSTN_GPIO_Port 0
 #define DWM_RSTN_Pin 1
 #define SPI1_NCS_GPIO_Port 0
@@ -14,6 +15,7 @@ typedef struct { int unused; } UART_HandleTypeDef;
 #define __HAL_GPIO_EXTI_CLEAR_IT(pin) ((void)(pin))
 #define UNUSED(x) ((void)(x))
 uint32_t __get_PRIMASK(void);
+uint32_t __get_IPSR(void);
 void __disable_irq(void);
 void __enable_irq(void);
 uint32_t NVIC_GetEnableIRQ(int irq);
@@ -24,4 +26,11 @@ void HAL_GPIO_WritePin(int port, int pin, int state);
 void HAL_Delay(uint32_t ms);
 uint32_t HAL_GetTick(void);
 int HAL_UART_Transmit(UART_HandleTypeDef *uart, uint8_t *buf, uint16_t len, uint32_t timeout);
+extern uint32_t SystemCoreClock;
+typedef struct { uint32_t DEMCR; } CoreDebug_Type;
+typedef struct { uint32_t CTRL; uint32_t CYCCNT; } DWT_Type;
+extern CoreDebug_Type *CoreDebug;
+extern DWT_Type *DWT;
+#define CoreDebug_DEMCR_TRCENA_Msk 0x01000000u
+#define DWT_CTRL_CYCCNTENA_Msk 1u
 #endif

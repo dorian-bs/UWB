@@ -21,7 +21,7 @@ INCLUDES = [
 ]
 
 
-@pytest.mark.parametrize("fixture", ["control", "radio", "usb", "lifecycle"])
+@pytest.mark.parametrize("fixture", ["control", "radio", "usb", "lifecycle", "log"])
 def test_native_firmware_control(fixture: str) -> None:
     compiler = shutil.which("cc")
     if compiler is None:
@@ -31,6 +31,7 @@ def test_native_firmware_control(fixture: str) -> None:
     sources = {
         "control": [PLATFORM / "qorvo_control.c"],
         "radio": [PLATFORM / "qorvo_radio_control.c"],
+        "log": [PLATFORM / "qorvo_log.c"],
         "usb": [
             PLATFORM / "qorvo_control.c",
             PLATFORM / "qorvo_usb_control.c",

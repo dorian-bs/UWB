@@ -487,7 +487,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == DWM_IRQ_Pin)
   {
+    qorvo_diag_isr_enter();
     dwt_isr();
+    qorvo_diag_isr_exit();
   }
 }
 

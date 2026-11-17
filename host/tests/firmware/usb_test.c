@@ -43,6 +43,7 @@ bool qorvo_settings_save(const qorvo_radio_state_t *state)
 void qorvo_control_pause(void) { pauses++; }
 bool qorvo_control_apply(const qorvo_radio_state_t *state) { (void)state; return true; }
 bool qorvo_control_resume(void) { return true; }
+void qorvo_diag_set(uint32_t flags, bool emit) { (void)flags; (void)emit; }
 
 static void out(const char *data)
 {

@@ -4,6 +4,7 @@
 #include "dw3000_deca_regs.h"
 #include "dw3000_deca_vals.h"
 #include "qorvo_control.h"
+#include "qorvo_log.h"
 #include "qorvo_radio_control.h"
 
 #include <stdio.h>
@@ -14,6 +15,117 @@
 
 extern UART_HandleTypeDef huart3;
 extern const struct dwt_driver_s dw3000_driver;
+
+/* -------------------------------------------------------------------------- */
+/* Sample-loss diagnostics                                                    */
+/* -------------------------------------------------------------------------- */
+/*
+ * Runtime switches (UWB <id> DIAG <flags>); 0 is the normal, fixed behaviour:
+ * log lines are queued and written from the main loop, and POLLs are scheduled on
+ * the Cortex-M cycle counter. The bits re-enable the old behaviour for A/B tests.
+ * Blocking 115200-baud UART writes inside the radio interrupt used to starve
+ * SysTick (the tick ran at ~0.55x real time), which stretched the POLL period.
+ */
+#define QORVO_DIAG_LEGACY_LOG  0x1U /* write log lines from the interrupt, blocking (old behaviour) */
+#define QORVO_DIAG_LEGACY_TICK 0x2U /* schedule POLLs on SysTick instead of the cycle counter */
+#define QORVO_DIAG_MUTE_TEXT   0x4U /* drop every non-JSON log line */
+#define QORVO_DIAG_FLAGS_ALL   0x7U
+#define QORVO_DIAG_EMIT_MS     1000U
+
+typedef struct
+{
+    volatile uint32_t flags;
+    volatile bool emit;
+    volatile bool in_isr;
+    volatile uint32_t isr_t0;
+    volatile uint32_t isr_count;
+    volatile uint64_t isr_cycles;
+    volatile uint32_t isr_max_cycles;
+    volatile uint64_t uart_isr_cycles;
+    volatile uint32_t reply_lat_max_cycles;
+    volatile uint32_t exch_t0;
+    volatile uint32_t exch_last_cycles;
+    volatile uint32_t exch_max_cycles;
+    volatile uint32_t polls;
+    volatile uint32_t ranges_ok;
+    volatile uint32_t compute_failed;
+    volatile uint32_t start_failed;
+    volatile uint32_t lines_suppressed;
+    volatile uint32_t rx_to;
+    volatile uint32_t rx_err;
+    volatile uint32_t rx_ok;
+} qorvo_diag_t;
+
+static qorvo_diag_t g_diag = {0};
+static uint64_t g_wall_cycles = 0ULL;
+static uint32_t g_wall_last = 0U;
+static uint32_t g_diag_wall_base = 0U;
+static uint32_t g_diag_tick_base = 0U;
+static uint32_t g_diag_last_emit_ms = 0U;
+
+static uint32_t qorvo_cycles_per_ms(void)
+{
+    return SystemCoreClock / 1000U;
+}
+
+static void qorvo_diag_cycle_counter_init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0U;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    g_wall_cycles = 0ULL;
+    g_wall_last = DWT->CYCCNT;
+}
+
+/* Milliseconds of real time since boot; must be called more often than every 25 s. */
+static uint32_t qorvo_wall_ms(void)
+{
+    uint32_t irq_state = __get_PRIMASK();
+    uint32_t now;
+    uint64_t total;
+
+    __disable_irq();
+    now = DWT->CYCCNT;
+    g_wall_cycles += (uint32_t)(now - g_wall_last);
+    g_wall_last = now;
+    total = g_wall_cycles;
+    if (irq_state == 0U) {
+        __enable_irq();
+    }
+    return (uint32_t)(total / qorvo_cycles_per_ms());
+}
+
+static uint32_t qorvo_sched_now(void)
+{
+    return ((g_diag.flags & QORVO_DIAG_LEGACY_TICK) != 0U) ? HAL_GetTick() : qorvo_wall_ms();
+}
+
+void qorvo_diag_isr_enter(void)
+{
+    g_diag.isr_t0 = DWT->CYCCNT;
+    g_diag.in_isr = true;
+}
+
+void qorvo_diag_isr_exit(void)
+{
+    uint32_t cycles = DWT->CYCCNT - g_diag.isr_t0;
+
+    g_diag.in_isr = false;
+    g_diag.isr_count++;
+    g_diag.isr_cycles += cycles;
+    if (cycles > g_diag.isr_max_cycles) {
+        g_diag.isr_max_cycles = cycles;
+    }
+}
+
+static void qorvo_diag_note_reply_start(void)
+{
+    uint32_t cycles = DWT->CYCCNT - g_diag.isr_t0;
+
+    if (g_diag.in_isr && (cycles > g_diag.reply_lat_max_cycles)) {
+        g_diag.reply_lat_max_cycles = cycles;
+    }
+}
 
 /* -------------------------------------------------------------------------- */
 /* Project tuning knobs                                                       */
@@ -85,11 +197,35 @@ extern const struct dwt_driver_s dw3000_driver;
 /* Logging                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * Lines are formatted in the caller's context (often the radio interrupt) and only
+ * copied into the qorvo_log ring; qorvo_log_drain() writes them out from the main loop,
+ * so the interrupt never waits on the 115200-baud UART or a busy USB endpoint.
+ */
+#define QORVO_LOG_UART_TIMEOUT_MS 20U
+
+bool qorvo_log_sink_cdc(const uint8_t *data, uint16_t len)
+{
+    return CDC_Transmit_FS((uint8_t *)data, len) == USBD_OK;
+}
+
+bool qorvo_log_sink_uart(const uint8_t *data, uint16_t len)
+{
+    return HAL_UART_Transmit(&huart3, (uint8_t *)data, len, QORVO_LOG_UART_TIMEOUT_MS) == HAL_OK;
+}
+
 static void qorvo_log_printf(const char *fmt, ...)
 {
-    char buf[320];
+    char buf[QORVO_LOG_LINE_MAX];
     va_list ap;
     uint16_t len;
+    bool json = (fmt[0] == '{');
+    uint32_t flags = g_diag.flags;
+
+    if (!json && ((flags & QORVO_DIAG_MUTE_TEXT) != 0U)) {
+        g_diag.lines_suppressed++;
+        return;
+    }
 
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -97,9 +233,27 @@ static void qorvo_log_printf(const char *fmt, ...)
 
     len = (uint16_t)strlen(buf);
 
-    (void)CDC_Transmit_FS((uint8_t *)buf, len);
-    (void)HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, HAL_MAX_DELAY);
+    if ((flags & QORVO_DIAG_LEGACY_LOG) == 0U) {
+        qorvo_log_enqueue((const uint8_t *)buf, len, json);
+        return;
+    }
+
+    /* Old behaviour, kept only for A/B measurements: blocking writes in the caller's context. */
+    if (CDC_Transmit_FS((uint8_t *)buf, len) != USBD_OK) {
+        qorvo_log_stats()->cdc_drop++;
+        if (json) {
+            qorvo_log_stats()->cdc_drop_json++;
+        }
+    }
+    if (__get_IPSR() != 0U) {
+        uint32_t t0 = DWT->CYCCNT;
+        (void)HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, HAL_MAX_DELAY);
+        g_diag.uart_isr_cycles += (uint32_t)(DWT->CYCCNT - t0);
+    } else {
+        (void)HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, HAL_MAX_DELAY);
+    }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* Low-level board helpers                                                    */
@@ -667,7 +821,7 @@ bool qorvo_control_resume(void)
     qorvo_clear_status_events();
     __HAL_GPIO_EXTI_CLEAR_IT(DWM_IRQ_Pin);
     HAL_NVIC_ClearPendingIRQ(DWM_IRQ_EXTI_IRQn);
-    g_link.last_tx_tick = HAL_GetTick();
+    g_link.last_tx_tick = qorvo_sched_now();
     if (g_link.role == QORVO_ROLE_RX) {
         dwt_setrxtimeout(0U);
         dwt_setpreambledetecttimeout(0U);
@@ -960,9 +1114,13 @@ static int32_t qorvo_send_frame_immediate(const uint8_t *tx_buf,
         g_link.tx_busy = 0U;
         g_link.last_tx_msg = QORVO_TXMSG_NONE;
         g_link.state = QORVO_STATE_IDLE;
+        g_diag.start_failed++;
         return ret;
     }
 
+    if (tx_msg != QORVO_TXMSG_POLL) {
+        qorvo_diag_note_reply_start();
+    }
     g_link.seq++;
     return DWT_SUCCESS;
 }
@@ -997,9 +1155,13 @@ static int32_t qorvo_send_frame_delayed_rs(const uint8_t *tx_buf,
         g_link.tx_busy = 0U;
         g_link.last_tx_msg = QORVO_TXMSG_NONE;
         g_link.state = QORVO_STATE_IDLE;
+        g_diag.start_failed++;
         return ret;
     }
 
+    if (tx_msg != QORVO_TXMSG_POLL) {
+        qorvo_diag_note_reply_start();
+    }
     g_link.seq++;
     return DWT_SUCCESS;
 }
@@ -1212,8 +1374,12 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
         g_link.last_distance_m = distance_m;
         g_link.last_distance_corrected_m = corrected_distance_m;
         g_link.range_valid = 1U;
+        g_diag.ranges_ok++;
+        g_diag.exch_last_cycles = DWT->CYCCNT - g_diag.exch_t0;
+        if (g_diag.exch_last_cycles > g_diag.exch_max_cycles) {
+            g_diag.exch_max_cycles = g_diag.exch_last_cycles;
+        }
 
-        qorvo_log_printf("  ds_twr.ToF        = %.3f dtu\r\n", tof_dtu);
         qorvo_log_printf("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
         qorvo_log_printf("  ds_twr.distance   = %.3f m\r\n", distance_m);
         qorvo_log_printf("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
@@ -1254,6 +1420,7 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
 #endif
     } else {
         g_link.range_valid = 0U;
+        g_diag.compute_failed++;
         qorvo_log_printf("  ds_twr.compute    = FAILED\r\n");
     }
 }
@@ -1318,6 +1485,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
     uint32_t counter;
 
     g_irq_rx_ok_count++;
+    g_diag.rx_ok++;
 
     frame_len = cb_data->datalength;
     if (frame_len > QORVO_MAX_FRAME_LEN) {
@@ -1537,6 +1705,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
 static void qorvo_cb_rx_to(const dwt_cb_data_t *cb_data)
 {
     g_irq_rx_to_count++;
+    g_diag.rx_to++;
 
     qorvo_log_printf("[IRQ][board %u] timeout, status=0x%08lX, total=%lu\r\n",
                      g_link.board_id,
@@ -1555,6 +1724,7 @@ static void qorvo_cb_rx_to(const dwt_cb_data_t *cb_data)
 static void qorvo_cb_rx_err(const dwt_cb_data_t *cb_data)
 {
     g_irq_rx_err_count++;
+    g_diag.rx_err++;
 
     qorvo_log_printf("[IRQ][board %u] error, status=0x%08lX, total=%lu\r\n",
                      g_link.board_id,
@@ -1612,7 +1782,8 @@ int32_t qorvo_link_init(uint8_t board_id, qorvo_role_t role)
     g_link.seq = 0U;
     g_link.tx_counter = 0U;
     g_link.rx_counter = 0U;
-    g_link.last_tx_tick = HAL_GetTick();
+    qorvo_diag_cycle_counter_init();
+    g_link.last_tx_tick = qorvo_sched_now();
     g_link.initialised = 0U;
     g_link.tx_busy = 0U;
     g_link.peer_board_id = 0U;
@@ -1660,22 +1831,109 @@ int32_t qorvo_link_init(uint8_t board_id, qorvo_role_t role)
     return DWT_SUCCESS;
 }
 
+void qorvo_diag_set(uint32_t flags, bool emit)
+{
+    uint32_t irq_state = __get_PRIMASK();
+
+    __disable_irq();
+    g_diag.flags = flags & QORVO_DIAG_FLAGS_ALL;
+    g_diag.emit = emit;
+    g_diag.isr_count = 0U;
+    g_diag.isr_cycles = 0ULL;
+    g_diag.isr_max_cycles = 0U;
+    g_diag.uart_isr_cycles = 0ULL;
+    g_diag.reply_lat_max_cycles = 0U;
+    g_diag.exch_last_cycles = 0U;
+    g_diag.exch_max_cycles = 0U;
+    g_diag.polls = 0U;
+    g_diag.ranges_ok = 0U;
+    g_diag.compute_failed = 0U;
+    g_diag.start_failed = 0U;
+    g_diag.lines_suppressed = 0U;
+    qorvo_log_stats_reset();
+    g_diag.rx_to = 0U;
+    g_diag.rx_err = 0U;
+    g_diag.rx_ok = 0U;
+    if (irq_state == 0U) {
+        __enable_irq();
+    }
+
+    g_diag_tick_base = HAL_GetTick();
+    g_diag_wall_base = qorvo_wall_ms();
+    g_diag_last_emit_ms = g_diag_wall_base;
+    g_link.last_tx_tick = qorvo_sched_now();
+}
+
+/* One compact line per second over USB only, counters since the last DIAG command. */
+static void qorvo_diag_emit(void)
+{
+    char buf[640];
+    uint32_t wall_ms = qorvo_wall_ms();
+    uint32_t per_ms = qorvo_cycles_per_ms();
+    uint32_t per_us = per_ms / 1000U;
+    int n;
+
+    if (!g_diag.emit || ((wall_ms - g_diag_last_emit_ms) < QORVO_DIAG_EMIT_MS)) {
+        return;
+    }
+
+    n = snprintf(buf, sizeof(buf),
+                 "{\"type\":\"diag\",\"v\":1,\"board\":%u,\"role\":\"%s\",\"flags\":%lu,"
+                 "\"tick_ms\":%lu,\"wall_ms\":%lu,\"polls\":%lu,\"ok\":%lu,"
+                 "\"compute_failed\":%lu,\"start_failed\":%lu,\"rx_ok\":%lu,\"rx_to\":%lu,"
+                 "\"rx_err\":%lu,\"isr_n\":%lu,\"isr_ms\":%lu,\"isr_max_us\":%lu,"
+                 "\"uart_isr_ms\":%lu,\"reply_lat_max_us\":%lu,\"exch_last_us\":%lu,"
+                 "\"exch_max_us\":%lu,\"suppressed\":%lu,\"log_drop\":%lu,\"log_drop_json\":%lu,"
+                 "\"cdc_drop\":%lu,\"cdc_drop_json\":%lu}\r\n",
+                 g_link.board_id,
+                 (g_link.role == QORVO_ROLE_TX) ? "tx" : "rx",
+                 (unsigned long)g_diag.flags,
+                 (unsigned long)(HAL_GetTick() - g_diag_tick_base),
+                 (unsigned long)(wall_ms - g_diag_wall_base),
+                 (unsigned long)g_diag.polls,
+                 (unsigned long)g_diag.ranges_ok,
+                 (unsigned long)g_diag.compute_failed,
+                 (unsigned long)g_diag.start_failed,
+                 (unsigned long)g_diag.rx_ok,
+                 (unsigned long)g_diag.rx_to,
+                 (unsigned long)g_diag.rx_err,
+                 (unsigned long)g_diag.isr_count,
+                 (unsigned long)(g_diag.isr_cycles / per_ms),
+                 (unsigned long)(g_diag.isr_max_cycles / per_us),
+                 (unsigned long)(g_diag.uart_isr_cycles / per_ms),
+                 (unsigned long)(g_diag.reply_lat_max_cycles / per_us),
+                 (unsigned long)(g_diag.exch_last_cycles / per_us),
+                 (unsigned long)(g_diag.exch_max_cycles / per_us),
+                 (unsigned long)g_diag.lines_suppressed,
+                 (unsigned long)qorvo_log_stats()->drop,
+                 (unsigned long)qorvo_log_stats()->drop_json,
+                 (unsigned long)qorvo_log_stats()->cdc_drop,
+                 (unsigned long)qorvo_log_stats()->cdc_drop_json);
+    if ((n > 0) && ((size_t)n < sizeof(buf)) &&
+        (CDC_Transmit_FS((uint8_t *)buf, (uint16_t)n) == USBD_OK)) {
+        g_diag_last_emit_ms = wall_ms;
+    }
+}
+
 void qorvo_link_process(void)
 {
     uint32_t now;
     int32_t ret;
 
     if (g_link.initialised == 0U) {
+        qorvo_log_drain(HAL_GetTick());
         return;
     }
 
+    qorvo_log_drain(qorvo_wall_ms());
     qorvo_usb_control_process();
+    qorvo_diag_emit();
     if (!qorvo_control_state()->running) {
         return;
     }
 
     if (g_link.role == QORVO_ROLE_TX) {
-        now = HAL_GetTick();
+        now = qorvo_sched_now();
 
         if ((g_link.state == QORVO_STATE_IDLE) &&
             (g_link.tx_busy == 0U) &&
@@ -1689,6 +1947,8 @@ void qorvo_link_process(void)
             dwt_forcetrxoff();
             qorvo_clear_status_events();
 
+            g_diag.polls++;
+            g_diag.exch_t0 = DWT->CYCCNT;
             ret = qorvo_send_poll();
             if (ret == DWT_SUCCESS) {
                 qorvo_log_printf("[POLL board %u] POLL sent seq=%u cnt=%lu len=%u\r\n",

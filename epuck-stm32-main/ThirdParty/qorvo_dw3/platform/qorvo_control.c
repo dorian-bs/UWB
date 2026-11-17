@@ -82,6 +82,11 @@ static void command(void)
             if (qorvo_control_resume()) state.running = true;
             else error = "resume_failed";
         }
+    } else if (!strcmp(words[2], "DIAG") && count == 4) {
+        uint32_t flags = 0;
+        if (!strcmp(words[3], "OFF")) qorvo_diag_set(0, false);
+        else if (decimal(words[3], &flags) && flags <= 7) qorvo_diag_set(flags, true);
+        else error = "invalid_config";
     } else if (!strcmp(words[2], "SET") && (count == 9 || count == 11)) {
         qorvo_radio_state_t requested = state;
         /* Legacy SET preserves the current hardware delays, not cached defaults. */

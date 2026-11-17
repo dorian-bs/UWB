@@ -183,6 +183,20 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
     return sample
 
 
+def parse_diag_line(line: str) -> dict[str, Any] | None:
+    """Firmware loss-diagnostic counters; informational, never a sample."""
+    line = line.strip()
+    if not line.startswith("{") or len(line) > 2048:
+        return None
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(message, dict) or message.get("type") != "diag":
+        return None
+    return message
+
+
 def is_json_like_line(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith("{") and len(stripped) <= 2048
@@ -198,6 +212,7 @@ class LabState:
         self.malformed_lines = 0
         self.sequence_gaps = 0
         self.last_sequence: int | None = None
+        self.last_diag: dict[str, Any] | None = None
 
     @property
     def prior(self) -> Prior | None:
@@ -213,6 +228,10 @@ class LabState:
         sample = parse_range_line(line)
         if sample is None:
             if not line.strip():
+                return None
+            diag = parse_diag_line(line)
+            if diag is not None:
+                self.last_diag = diag
                 return None
             if is_json_like_line(line):
                 self.malformed_lines += 1

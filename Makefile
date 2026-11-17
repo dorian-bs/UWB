@@ -1,6 +1,6 @@
 PY := .venv/bin/python
 
-.PHONY: help setup check verify lint fmt test demo replay build \
+.PHONY: help setup check verify lint fmt test probe-loss demo replay build \
         esp-config esp-build esp-flash \
         stm-tx-flash stm-rx-flash stm-tx-dfu-flash stm-rx-dfu-flash stm-dfu-flash
 
@@ -43,6 +43,9 @@ fmt:
 
 test:
 	$(PY) -m pytest host/tests
+
+probe-loss:
+	$(PY) -m uwb_lab.loss_probe
 
 demo:
 	bash scripts/run_dashboard.sh --source demo

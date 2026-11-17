@@ -46,6 +46,11 @@ bool qorvo_settings_save(const qorvo_radio_state_t *state)
 void qorvo_control_pause(void) { pauses++; }
 bool qorvo_control_resume(void) { resumes++; return !fail_resume; }
 
+static uint32_t diag_flags = 99;
+static bool diag_emit;
+static unsigned diag_calls;
+void qorvo_diag_set(uint32_t flags, bool emit) { diag_flags = flags; diag_emit = emit; diag_calls++; }
+
 bool qorvo_control_apply(const qorvo_radio_state_t *requested)
 {
     applies++;
@@ -81,6 +86,19 @@ int main(void)
     expect("\"revision\":0,\"period_ms\":1000");
     expect("\"tx_power\":305419896,\"running\":true");
     expect("\"tx_ant_dly\":16380,\"rx_ant_dly\":16380");
+
+    /* DIAG is accepted while running and never touches the radio configuration. */
+    feed("UWB 70 DIAG 5\n");
+    expect("\"id\":70,\"ok\":true");
+    assert(diag_flags == 5 && diag_emit && diag_calls == 1);
+    feed("UWB 71 DIAG OFF\n");
+    expect("\"ok\":true");
+    assert(diag_flags == 0 && !diag_emit && diag_calls == 2);
+    feed("UWB 72 DIAG 8\n");
+    expect("\"error\":\"invalid_config\"");
+    feed("UWB 73 DIAG\n");
+    expect("\"error\":\"invalid_command\"");
+    assert(diag_calls == 2 && applies == 0 && pauses == 0);
 
     feed("UWB 43 SET 1 100 5 256 850 4294967295 12345 23456\n");
     expect("\"error\":\"must_pause\"");

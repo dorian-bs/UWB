@@ -151,7 +151,21 @@ UWB <id> PAUSE
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power>
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power> <tx_ant_dly> <rx_ant_dly>
 UWB <id> RESUME
+UWB <id> DIAG <flags 0-7|OFF>
 ```
+
+`DIAG` is a loss-investigation aid, accepted while running. `flags` is a bit mask; 0 is the
+normal behaviour (log lines queued from interrupts and drained by the main loop with JSON range
+records given priority, TX scheduled from the DWT cycle counter so a starved SysTick cannot
+stretch the period). 1 = legacy blocking log writes from the DW3000 interrupt, 2 = legacy SysTick
+TX scheduling, 4 = drop all non-JSON text lines. The bits exist only for A/B tests.
+It resets the counters and, once enabled, the board emits one
+`{"type":"diag","v":1,...}` line per wall-clock second on USB CDC only (tick/wall time,
+polls, ISR duty, UART-in-ISR time, reply latency, timeouts, `log_drop`/`log_drop_json` lines
+dropped by the full queue, `cdc_drop`/`cdc_drop_json` lines USB could not take).
+The host keeps the latest one in `LabState.last_diag`; diag lines are never samples.
+`make probe-loss` drives it (`host/uwb_lab/loss_probe.py`, dashboard stopped).
+`DIAG OFF` restores default behaviour; the setting is not persisted.
 
 `SET` requires a paused board. Periods: 100-10000 ms; channels: 5/9;
 preambles: 64/128/256/512/1024; rates: 850/6800 kbps.
