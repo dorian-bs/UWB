@@ -219,11 +219,11 @@
     <aside id="experiment-controls" class="controls">
       <section aria-label="Physical radio configuration">
         <details id="radio-panel" class="control-panel">
-        <summary><h2>Radio / sampling</h2><button type="button" class="info" data-tip="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. The 10 Hz limit is not a hardware guarantee." aria-label="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. The 10 Hz limit is not a hardware guarantee.">i</button></summary>
+        <summary><h2>Radio / sampling</h2><button type="button" class="info" data-tip="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. Rates above about 20 Hz are only complete on USB, not over the ESP32 Wi-Fi link. The 50 Hz limit is not a hardware guarantee." aria-label="Applies to both physical boards, not simulated noise. Changing radio settings briefly pauses ranging. TX power is a raw register, not dBm; use only lab-approved values. Requested rate is rounded to milliseconds; observed rate depends on exchange success and transport. Rates above about 20 Hz are only complete on USB, not over the ESP32 Wi-Fi link. The 50 Hz limit is not a hardware guarantee.">i</button></summary>
         <form id="radio-form">
           <fieldset id="radio-fields" disabled>
             <label>Requested ranging rate (Hz)
-              <input name="sampling_hz" type="number" min="0.1" max="10" step="any" required>
+              <input name="sampling_hz" type="number" min="0.1" max="50" step="any" required>
             </label>
             <label>Channel<select name="channel"><option value="5">5</option><option value="9">9</option></select></label>
             <label>Preamble (symbols)<select name="preamble">

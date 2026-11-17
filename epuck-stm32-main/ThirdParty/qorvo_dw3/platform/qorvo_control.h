@@ -26,8 +26,9 @@ size_t qorvo_control_receive(const uint8_t *data, size_t len);
 void qorvo_control_process(void);
 bool qorvo_control_ack_pending(void);
 /* Loss diagnostics. 0 is the normal behaviour (queued logging, cycle-counter scheduling);
- * 1=legacy blocking log writes, 2=SysTick scheduling, 4=drop all text lines (A/B tests).
- * Resets the diagnostic counters; emit enables one {"type":"diag"} line per second. */
+ * 1=legacy blocking log writes, 2=SysTick scheduling, 4=drop all text lines, 8=per-exchange
+ * narration (A/B tests and bring-up). Resets the diagnostic counters; emit enables one
+ * {"type":"diag"} line per second. */
 void qorvo_diag_set(uint32_t flags, bool emit);
 const qorvo_radio_state_t *qorvo_control_state(void);
 

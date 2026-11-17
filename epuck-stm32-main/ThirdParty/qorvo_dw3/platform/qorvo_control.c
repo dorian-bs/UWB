@@ -27,7 +27,7 @@ static bool decimal(const char *word, uint32_t *value)
 
 static bool valid(const qorvo_radio_state_t *s)
 {
-    return s->revision > 0 && s->period_ms >= 100 && s->period_ms <= 10000 &&
+    return s->revision > 0 && s->period_ms >= 10 && s->period_ms <= 10000 &&
         (s->channel == 5 || s->channel == 9) &&
         (s->preamble == 64 || s->preamble == 128 || s->preamble == 256 ||
          s->preamble == 512 || s->preamble == 1024) &&
@@ -85,7 +85,7 @@ static void command(void)
     } else if (!strcmp(words[2], "DIAG") && count == 4) {
         uint32_t flags = 0;
         if (!strcmp(words[3], "OFF")) qorvo_diag_set(0, false);
-        else if (decimal(words[3], &flags) && flags <= 7) qorvo_diag_set(flags, true);
+        else if (decimal(words[3], &flags) && flags <= 15) qorvo_diag_set(flags, true);
         else error = "invalid_config";
     } else if (!strcmp(words[2], "SET") && (count == 9 || count == 11)) {
         qorvo_radio_state_t requested = state;

@@ -115,7 +115,7 @@ Performance and safe/regulatory RF settings must be validated on the actual hard
 
 | UI parameter | Unit / encoding | Supported values | Boot behavior |
 | --- | --- | --- | --- |
-| Requested ranging rate | Exchanges attempted per second, Hz | 0.1-10 | 1 Hz / 1000 ms initiator poll period |
+| Requested ranging rate | Exchanges attempted per second, Hz | 0.1-50 | 1 Hz / 1000 ms initiator poll period |
 | Channel | UWB channel number | 5 or 9 | 9 |
 | Preamble | Synchronization symbols per transmitted packet | 64, 128, 256, 512, 1024 | 128 |
 | Data rate | Packet payload bit rate | 850 kbps or 6.8 Mbps | 6.8 Mbps |
@@ -140,9 +140,9 @@ nominal_hz = 1000 / period_ms
 ```
 
 Examples: 0.1 Hz gives 10000 ms, 1 Hz gives 1000 ms, 5 Hz gives 200 ms, and
-10 Hz gives 100 ms. A 3 Hz request rounds to 333 ms, approximately 3.003 Hz.
+10 Hz gives 100 ms, 50 Hz gives 20 ms. A 3 Hz request rounds to 333 ms, approximately 3.003 Hz.
 New polls only start when the exchange state permits them, so this period does not
-guarantee a completed measurement at every deadline. The 10 Hz UI limit is a command
+guarantee a completed measurement at every deadline. The 50 Hz UI limit is a command
 guard, not a certified maximum throughput.
 
 Higher rates resolve faster motion and transitions, and collect more observations

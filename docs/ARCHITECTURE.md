@@ -48,10 +48,15 @@ to localhost by default; the ESP32 bridge is trusted-lab-only.
 The initiator emits one UTF-8 JSON line per successful exchange:
 
 ```json
-{"type":"range","v":2,"board":1,"peer":2,"seq":42,"time_ms":41000,"raw_m":2.1234,"corrected_m":2.1012,"valid":true,"radio_revision":5,"ipatov_power":123456,"ipatov_f1":1000,"ipatov_f2":2000,"ipatov_f3":3000,"ipatov_fp_index":512,"ipatov_accum_count":128,"cia_diag1":42}
+{"type":"range","v":2,"board":1,"peer":2,"seq":42,"time_ms":41000,"raw_m":2.1234,"corrected_m":2.1012,"valid":true,"radio_revision":5,"ipatov_power":123456,"ipatov_f1":1000,"ipatov_f2":2000,"ipatov_f3":3000,"ipatov_fp_index":512,"ipatov_accum_count":128,"cia_diag1":42,"ra_dtu":1000000,"rb_dtu":1100000,"da_dtu":900000,"db_dtu":950000}
 ```
 
 `raw_m` and `corrected_m` are metres; `time_ms` is device time in milliseconds.
+`ra_dtu`, `rb_dtu`, `da_dtu`, `db_dtu` are the DS-TWR round-trip (Ra, Rb) and reply (Da, Db)
+intervals in DW3000 time units (1 dtu ≈ 15.65 ps). They are optional (older captures lack them),
+kept unchanged in recordings, and are enough to recompute the range
+(`ToF = (Ra·Rb − Da·Db) / (Ra+Rb+Da+Db)`) or estimate the clock offset between the boards offline.
+They replace the per-exchange debug text, which the firmware no longer prints unless `DIAG 8` is set.
 The host ignores non-JSON debug text and counts malformed JSON-like lines.
 It validates bounded, finite range values and adds a host UTC timestamp.
 Version 1 remains accepted for older captures. Version 2 adds required DW3000
@@ -151,14 +156,17 @@ UWB <id> PAUSE
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power>
 UWB <id> SET <revision> <period_ms> <channel> <preamble> <data_rate> <tx_power> <tx_ant_dly> <rx_ant_dly>
 UWB <id> RESUME
-UWB <id> DIAG <flags 0-7|OFF>
+UWB <id> DIAG <flags 0-15|OFF>
 ```
 
 `DIAG` is a loss-investigation aid, accepted while running. `flags` is a bit mask; 0 is the
 normal behaviour (log lines queued from interrupts and drained by the main loop with JSON range
 records given priority, TX scheduled from the DWT cycle counter so a starved SysTick cannot
 stretch the period). 1 = legacy blocking log writes from the DW3000 interrupt, 2 = legacy SysTick
-TX scheduling, 4 = drop all non-JSON text lines. The bits exist only for A/B tests.
+TX scheduling, 4 = drop all non-JSON text lines, 8 = print the per-exchange narration lines
+(`POLL from…`, `ds_twr.*`, timestamps; off by default because the range JSON carries the same
+data). Failures, timeouts and boot messages are always printed. The bits exist for A/B tests and
+bring-up.
 It resets the counters and, once enabled, the board emits one
 `{"type":"diag","v":1,...}` line per wall-clock second on USB CDC only (tick/wall time,
 polls, ISR duty, UART-in-ISR time, reply latency, timeouts, `log_drop`/`log_drop_json` lines
@@ -167,7 +175,12 @@ The host keeps the latest one in `LabState.last_diag`; diag lines are never samp
 `make probe-loss` drives it (`host/uwb_lab/loss_probe.py`, dashboard stopped).
 `DIAG OFF` restores default behaviour; the setting is not persisted.
 
-`SET` requires a paused board. Periods: 100-10000 ms; channels: 5/9;
+The UART to the ESP32 is decoupled from USB: it copies one whole line at a time and skips new
+lines while busy (`uart_skip`, `uart_skip_json`; a JSON record waits behind a text line but is
+skipped behind another JSON). USB CDC receives every queued line.
+
+`SET` requires a paused board. Firmware periods: 10-10000 ms; the host guard is 20-10000 ms (50 Hz),
+the highest rate measured with ≥97% yield; channels: 5/9;
 preambles: 64/128/256/512/1024; rates: 850/6800 kbps.
 TX power is a raw uint32 DW3000 register, not dBm. The UI shows hexadecimal;
 the protocol uses decimal. Supported numeric values are not RF certification.

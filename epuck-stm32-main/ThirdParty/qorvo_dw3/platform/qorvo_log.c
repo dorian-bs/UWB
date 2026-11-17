@@ -1,5 +1,7 @@
 #include "qorvo_log.h"
 
+#include <string.h>
+
 #include "main.h"
 
 #define RING_SIZE       4096U /* power of two */
@@ -16,14 +18,21 @@ static volatile uint32_t tail; /* advanced by the main loop only */
 static qorvo_log_stats_t stats;
 
 static uint8_t cur[QORVO_LOG_LINE_MAX];
-static uint16_t cur_len, cur_uart_off;
+static uint16_t cur_len;
 static uint32_t cur_t0_ms;
-static bool cur_json, cur_cdc_done, have_cur;
+static bool cur_json, cur_cdc_done, cur_uart_pending, have_cur;
+
+/* The UART is ~100x slower than USB, so it works on its own copy of a line and only ever takes
+ * whole lines; USB is never held back by it. */
+static uint8_t ubuf[QORVO_LOG_LINE_MAX];
+static uint16_t ulen, uoff;
+static bool uart_active, uart_json;
 
 void qorvo_log_reset(void)
 {
     head = tail = 0U;
     have_cur = false;
+    uart_active = false;
     stats = (qorvo_log_stats_t){0};
 }
 
@@ -31,7 +40,7 @@ qorvo_log_stats_t *qorvo_log_stats(void) { return &stats; }
 
 void qorvo_log_stats_reset(void) { stats = (qorvo_log_stats_t){0}; }
 
-bool qorvo_log_pending(void) { return have_cur || head != tail; }
+bool qorvo_log_pending(void) { return have_cur || uart_active || head != tail; }
 
 void qorvo_log_enqueue(const uint8_t *text, uint16_t len, bool json)
 {
@@ -68,8 +77,8 @@ static bool load_next(uint32_t now_ms)
     cur_len |= (uint16_t)((uint16_t)ring[pos++ & RING_MASK] << 8);
     for (i = 0U; i < cur_len; i++) cur[i] = ring[pos++ & RING_MASK];
     tail = pos;
-    cur_uart_off = 0U;
     cur_cdc_done = false;
+    cur_uart_pending = true;
     cur_t0_ms = now_ms;
     have_cur = true;
     return true;
@@ -77,25 +86,46 @@ static bool load_next(uint32_t now_ms)
 
 void qorvo_log_drain(uint32_t now_ms)
 {
-    if (!have_cur && !load_next(now_ms)) return;
+    if (!have_cur) (void)load_next(now_ms);
 
-    if (!cur_cdc_done) {
-        if (qorvo_log_sink_cdc(cur, cur_len)) {
-            cur_cdc_done = true;
-        } else if (now_ms - cur_t0_ms > (cur_json ? CDC_JSON_WAIT_MS : CDC_WAIT_MS)) {
-            /* No host, or the endpoint stayed busy: never hold up the UART for it. */
-            cur_cdc_done = true;
-            stats.cdc_drop++;
-            if (cur_json) stats.cdc_drop_json++;
+    if (have_cur) {
+        if (!cur_cdc_done) {
+            if (qorvo_log_sink_cdc(cur, cur_len)) {
+                cur_cdc_done = true;
+            } else if (now_ms - cur_t0_ms > (cur_json ? CDC_JSON_WAIT_MS : CDC_WAIT_MS)) {
+                /* No host, or the endpoint stayed busy: never hold up the UART for it. */
+                cur_cdc_done = true;
+                stats.cdc_drop++;
+                if (cur_json) stats.cdc_drop_json++;
+            }
         }
+
+        if (cur_uart_pending) {
+            if (!uart_active) {
+                memcpy(ubuf, cur, cur_len);
+                ulen = cur_len;
+                uoff = 0U;
+                uart_json = cur_json;
+                uart_active = true;
+                cur_uart_pending = false;
+            } else if (!(cur_json && !uart_json)) {
+                /* UART still busy: it misses this line. A JSON record waits instead when only
+                 * text is in the way, so the text cannot cost a sample. */
+                stats.uart_skip++;
+                if (cur_json) stats.uart_skip_json++;
+                cur_uart_pending = false;
+            }
+        }
+
+        if (cur_cdc_done && !cur_uart_pending) have_cur = false;
     }
 
-    if (cur_uart_off < cur_len) {
-        uint16_t n = (uint16_t)(cur_len - cur_uart_off);
+    if (uart_active) {
+        uint16_t n = (uint16_t)(ulen - uoff);
         if (n > UART_CHUNK) n = UART_CHUNK;
         /* A failed chunk abandons the rest of this line rather than stalling the queue. */
-        cur_uart_off = qorvo_log_sink_uart(&cur[cur_uart_off], n) ? (uint16_t)(cur_uart_off + n) : cur_len;
+        if (qorvo_log_sink_uart(&ubuf[uoff], n)) uoff = (uint16_t)(uoff + n);
+        else uoff = ulen;
+        if (uoff >= ulen) uart_active = false;
     }
-
-    if (cur_cdc_done && cur_uart_off >= cur_len) have_cur = false;
 }

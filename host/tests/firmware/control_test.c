@@ -94,7 +94,7 @@ int main(void)
     feed("UWB 71 DIAG OFF\n");
     expect("\"ok\":true");
     assert(diag_flags == 0 && !diag_emit && diag_calls == 2);
-    feed("UWB 72 DIAG 8\n");
+    feed("UWB 72 DIAG 16\n");
     expect("\"error\":\"invalid_config\"");
     feed("UWB 73 DIAG\n");
     expect("\"error\":\"invalid_command\"");
@@ -121,7 +121,7 @@ int main(void)
 
     const char *invalid[] = {
         "UWB 1 SET 0 100 9 128 6800 1\n",
-        "UWB 1 SET 2 99 9 128 6800 1\n",
+        "UWB 1 SET 2 9 9 128 6800 1\n",
         "UWB 1 SET 2 10001 9 128 6800 1\n",
         "UWB 1 SET 2 100 7 128 6800 1\n",
         "UWB 1 SET 2 100 9 127 6800 1\n",

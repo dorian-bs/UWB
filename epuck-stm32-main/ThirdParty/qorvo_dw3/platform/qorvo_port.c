@@ -29,7 +29,8 @@ extern const struct dwt_driver_s dw3000_driver;
 #define QORVO_DIAG_LEGACY_LOG  0x1U /* write log lines from the interrupt, blocking (old behaviour) */
 #define QORVO_DIAG_LEGACY_TICK 0x2U /* schedule POLLs on SysTick instead of the cycle counter */
 #define QORVO_DIAG_MUTE_TEXT   0x4U /* drop every non-JSON log line */
-#define QORVO_DIAG_FLAGS_ALL   0x7U
+#define QORVO_DIAG_TRACE       0x8U /* print the per-exchange narration lines (off by default) */
+#define QORVO_DIAG_FLAGS_ALL   0xFU
 #define QORVO_DIAG_EMIT_MS     1000U
 
 typedef struct
@@ -221,6 +222,7 @@ static void qorvo_log_printf(const char *fmt, ...)
     uint16_t len;
     bool json = (fmt[0] == '{');
     uint32_t flags = g_diag.flags;
+    int written;
 
     if (!json && ((flags & QORVO_DIAG_MUTE_TEXT) != 0U)) {
         g_diag.lines_suppressed++;
@@ -228,8 +230,14 @@ static void qorvo_log_printf(const char *fmt, ...)
     }
 
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    written = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+
+    /* A truncated JSON record would be unparseable; count it instead of sending garbage. */
+    if (json && ((written < 0) || ((size_t)written >= sizeof(buf)))) {
+        qorvo_log_stats()->drop_json++;
+        return;
+    }
 
     len = (uint16_t)strlen(buf);
 
@@ -253,6 +261,16 @@ static void qorvo_log_printf(const char *fmt, ...)
         (void)HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, HAL_MAX_DELAY);
     }
 }
+
+/* Per-exchange narration. Everything it says is in the range JSON record, so it is skipped
+ * (arguments included, to keep the interrupt short) unless DIAG enables it. Failures, timeouts and
+ * boot messages are not traces. */
+#define qorvo_trace(...)                                      \
+    do {                                                      \
+        if ((g_diag.flags & QORVO_DIAG_TRACE) != 0U) {        \
+            qorvo_log_printf(__VA_ARGS__);                    \
+        }                                                     \
+    } while (0)
 
 
 /* -------------------------------------------------------------------------- */
@@ -1352,10 +1370,10 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
     da_u64 = qorvo_ts_diff_u40(t3, t2);
     db_u64 = qorvo_ts_diff_u40(t5, t4);
 
-    qorvo_log_printf("  ds_twr.Ra         = %lu dtu\r\n", (unsigned long long)ra_u64);
-    qorvo_log_printf("  ds_twr.Rb         = %lu dtu\r\n", (unsigned long long)rb_u64);
-    qorvo_log_printf("  ds_twr.Da         = %lu dtu\r\n", (unsigned long long)da_u64);
-    qorvo_log_printf("  ds_twr.Db         = %lu dtu\r\n", (unsigned long long)db_u64);
+    qorvo_trace("  ds_twr.Ra         = %lu dtu\r\n", (unsigned long)ra_u64);
+    qorvo_trace("  ds_twr.Rb         = %lu dtu\r\n", (unsigned long)rb_u64);
+    qorvo_trace("  ds_twr.Da         = %lu dtu\r\n", (unsigned long)da_u64);
+    qorvo_trace("  ds_twr.Db         = %lu dtu\r\n", (unsigned long)db_u64);
 
     if (qorvo_compute_ds_twr(g_link.poll_tx_ts,
                              rep_poll_rx_ts,
@@ -1380,14 +1398,17 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
             g_diag.exch_max_cycles = g_diag.exch_last_cycles;
         }
 
-        qorvo_log_printf("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
-        qorvo_log_printf("  ds_twr.distance   = %.3f m\r\n", distance_m);
-        qorvo_log_printf("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
+        qorvo_trace("  ds_twr.ToF        = %.3f ns\r\n", tof_ns);
+        qorvo_trace("  ds_twr.distance   = %.3f m\r\n", distance_m);
+        qorvo_trace("  ds_twr.corrected  = %.3f m\r\n", corrected_distance_m);
+        /* ra/rb/da/db are the DS-TWR round-trip and reply intervals in DW3000 time units; with them
+         * the range can be recomputed offline and the clock offset between the boards estimated. */
         qorvo_log_printf(
             "{\"type\":\"range\",\"v\":2,\"board\":%u,\"peer\":%u,\"seq\":%lu,\"time_ms\":%lu,"
             "\"raw_m\":%.4f,\"corrected_m\":%.4f,\"valid\":true,\"radio_revision\":%lu,"
             "\"ipatov_power\":%lu,\"ipatov_f1\":%lu,\"ipatov_f2\":%lu,\"ipatov_f3\":%lu,"
-            "\"ipatov_fp_index\":%u,\"ipatov_accum_count\":%u,\"cia_diag1\":%lu}\r\n",
+            "\"ipatov_fp_index\":%u,\"ipatov_accum_count\":%u,\"cia_diag1\":%lu,"
+            "\"ra_dtu\":%lu,\"rb_dtu\":%lu,\"da_dtu\":%lu,\"db_dtu\":%lu}\r\n",
             g_link.board_id,
             g_link.peer_board_id,
             (unsigned long)g_link.current_exchange_counter,
@@ -1401,7 +1422,11 @@ static void qorvo_log_ds_twr_result(const uint8_t rep_poll_rx_ts[5],
             (unsigned long)g_link.last_ipatov_f3,
             (unsigned int)g_link.last_ipatov_fp_index,
             (unsigned int)g_link.last_ipatov_accum_count,
-            (unsigned long)g_link.last_cia_diag1);
+            (unsigned long)g_link.last_cia_diag1,
+            (unsigned long)ra_u64,
+            (unsigned long)rb_u64,
+            (unsigned long)da_u64,
+            (unsigned long)db_u64);
 
 #if QORVO_CAL_ANT_DELAY_MODE
         qorvo_stats_add(&g_link.cal_stats, corrected_distance_m);
@@ -1460,7 +1485,7 @@ static void qorvo_cb_tx_done(const dwt_cb_data_t *cb_data)
     tx_ts_lo = (uint32_t)(tx_ts_u64 & 0xFFFFFFFFULL);
     tx_ts_hi = (uint8_t)((tx_ts_u64 >> 32) & 0xFFU);
 
-    qorvo_log_printf("[IRQ][board %u] TX done, tx_ts=0x%02X%08lX, total=%lu\r\n",
+    qorvo_trace("[IRQ][board %u] TX done, tx_ts=0x%02X%08lX, total=%lu\r\n",
                      g_link.board_id,
                      tx_ts_hi,
                      (unsigned long)tx_ts_lo,
@@ -1520,7 +1545,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
         ((uint32_t)rx_buf[QORVO_HDR_IDX_COUNTER + 3U] << 24);
 
     if ((msg_type == QORVO_MSG_POLL) && (frame_len == QORVO_POLL_FRAME_LEN)) {
-        qorvo_log_printf("[IRQ][board %u] POLL from board %u, seq=%u, cnt=%lu len=%u rng=%u rx_ts=0x%02X%08lX\r\n",
+        qorvo_trace("[IRQ][board %u] POLL from board %u, seq=%u, cnt=%lu len=%u rng=%u rx_ts=0x%02X%08lX\r\n",
                          g_link.board_id,
                          src_board_id,
                          rx_buf[2],
@@ -1546,7 +1571,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
 
             ret = qorvo_send_answer(src_board_id);
             if (ret == DWT_SUCCESS) {
-                qorvo_log_printf("[ANSWER board %u] ANSWER scheduled to board %u, seq=%u cnt=%lu delay=%u uus\r\n",
+                qorvo_trace("[ANSWER board %u] ANSWER scheduled to board %u, seq=%u cnt=%lu delay=%u uus\r\n",
                                  g_link.board_id,
                                  src_board_id,
                                  (uint8_t)(g_link.seq - 1U),
@@ -1562,7 +1587,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
     }
 
     if ((msg_type == QORVO_MSG_ANSWER) && (frame_len == QORVO_ANSWER_FRAME_LEN)) {
-        qorvo_log_printf("[IRQ][board %u] ANSWER from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
+        qorvo_trace("[IRQ][board %u] ANSWER from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
                          g_link.board_id,
                          src_board_id,
                          rx_buf[2],
@@ -1593,7 +1618,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
 
             ret = qorvo_send_final(src_board_id);
             if (ret == DWT_SUCCESS) {
-                qorvo_log_printf("[FINAL board %u] FINAL scheduled to board %u, seq=%u cnt=%lu delay=%u uus\r\n",
+                qorvo_trace("[FINAL board %u] FINAL scheduled to board %u, seq=%u cnt=%lu delay=%u uus\r\n",
                                  g_link.board_id,
                                  src_board_id,
                                  (uint8_t)(g_link.seq - 1U),
@@ -1610,7 +1635,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
     }
 
     if ((msg_type == QORVO_MSG_FINAL) && (frame_len == QORVO_FINAL_FRAME_LEN)) {
-        qorvo_log_printf("[IRQ][board %u] FINAL from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
+        qorvo_trace("[IRQ][board %u] FINAL from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
                          g_link.board_id,
                          src_board_id,
                          rx_buf[2],
@@ -1627,7 +1652,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
 
             ret = qorvo_send_report(src_board_id);
             if (ret == DWT_SUCCESS) {
-                qorvo_log_printf("[REPORT board %u] REPORT started to board %u, seq=%u cnt=%lu\r\n",
+                qorvo_trace("[REPORT board %u] REPORT started to board %u, seq=%u cnt=%lu\r\n",
                                  g_link.board_id,
                                  src_board_id,
                                  (uint8_t)(g_link.seq - 1U),
@@ -1654,7 +1679,7 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
         memcpy(rep_answer_tx_ts, &rx_buf[20], 5U);
         memcpy(rep_final_rx_ts, &rx_buf[25], 5U);
 
-        qorvo_log_printf("[IRQ][board %u] REPORT from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
+        qorvo_trace("[IRQ][board %u] REPORT from board %u, seq=%u cnt=%lu rx_ts=0x%02X%08lX\r\n",
                          g_link.board_id,
                          src_board_id,
                          rx_buf[2],
@@ -1665,17 +1690,17 @@ static void qorvo_cb_rx_ok(const dwt_cb_data_t *cb_data)
         ts64 = qorvo_ts5_to_u64(rep_poll_rx_ts);
         lo = (uint32_t)(ts64 & 0xFFFFFFFFULL);
         hi = (uint8_t)((ts64 >> 32) & 0xFFU);
-        qorvo_log_printf("  report.poll_rx_ts   = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
+        qorvo_trace("  report.poll_rx_ts   = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
 
         ts64 = qorvo_ts5_to_u64(rep_answer_tx_ts);
         lo = (uint32_t)(ts64 & 0xFFFFFFFFULL);
         hi = (uint8_t)((ts64 >> 32) & 0xFFU);
-        qorvo_log_printf("  report.answer_tx_ts = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
+        qorvo_trace("  report.answer_tx_ts = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
 
         ts64 = qorvo_ts5_to_u64(rep_final_rx_ts);
         lo = (uint32_t)(ts64 & 0xFFFFFFFFULL);
         hi = (uint8_t)((ts64 >> 32) & 0xFFU);
-        qorvo_log_printf("  report.final_rx_ts  = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
+        qorvo_trace("  report.final_rx_ts  = 0x%02X%08lX\r\n", hi, (unsigned long)lo);
 
         if ((g_link.role == QORVO_ROLE_TX) &&
             (g_link.state == QORVO_STATE_WAIT_REPORT) &&
@@ -1884,7 +1909,7 @@ static void qorvo_diag_emit(void)
                  "\"rx_err\":%lu,\"isr_n\":%lu,\"isr_ms\":%lu,\"isr_max_us\":%lu,"
                  "\"uart_isr_ms\":%lu,\"reply_lat_max_us\":%lu,\"exch_last_us\":%lu,"
                  "\"exch_max_us\":%lu,\"suppressed\":%lu,\"log_drop\":%lu,\"log_drop_json\":%lu,"
-                 "\"cdc_drop\":%lu,\"cdc_drop_json\":%lu}\r\n",
+                 "\"cdc_drop\":%lu,\"cdc_drop_json\":%lu,\"uart_skip\":%lu,\"uart_skip_json\":%lu}\r\n",
                  g_link.board_id,
                  (g_link.role == QORVO_ROLE_TX) ? "tx" : "rx",
                  (unsigned long)g_diag.flags,
@@ -1908,7 +1933,9 @@ static void qorvo_diag_emit(void)
                  (unsigned long)qorvo_log_stats()->drop,
                  (unsigned long)qorvo_log_stats()->drop_json,
                  (unsigned long)qorvo_log_stats()->cdc_drop,
-                 (unsigned long)qorvo_log_stats()->cdc_drop_json);
+                 (unsigned long)qorvo_log_stats()->cdc_drop_json,
+                 (unsigned long)qorvo_log_stats()->uart_skip,
+                 (unsigned long)qorvo_log_stats()->uart_skip_json);
     if ((n > 0) && ((size_t)n < sizeof(buf)) &&
         (CDC_Transmit_FS((uint8_t *)buf, (uint16_t)n) == USBD_OK)) {
         g_diag_last_emit_ms = wall_ms;
@@ -1951,7 +1978,7 @@ void qorvo_link_process(void)
             g_diag.exch_t0 = DWT->CYCCNT;
             ret = qorvo_send_poll();
             if (ret == DWT_SUCCESS) {
-                qorvo_log_printf("[POLL board %u] POLL sent seq=%u cnt=%lu len=%u\r\n",
+                qorvo_trace("[POLL board %u] POLL sent seq=%u cnt=%lu len=%u\r\n",
                                  g_link.board_id,
                                  (uint8_t)(g_link.seq - 1U),
                                  (unsigned long)g_link.current_exchange_counter,

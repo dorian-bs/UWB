@@ -111,6 +111,9 @@ V2_DIAGNOSTIC_FIELDS: dict[str, tuple[int, int]] = {
     "cia_diag1": (0, 0xFFFFFFFF),
 }
 
+# Optional DS-TWR round-trip/reply intervals in DW3000 time units (Ra, Rb, Da, Db); recorded
+# unchanged so the range and the clock offset can be recomputed offline.
+INTERVAL_FIELDS = ("ra_dtu", "rb_dtu", "da_dtu", "db_dtu")
 
 # DW3000 User Manual 4.7.2/4.7.3 constant for a 64 MHz PRF. Assumed, not read from the radio.
 RX_LEVEL_OFFSET_DB = 121.7
@@ -180,6 +183,12 @@ def parse_range_line(line: str) -> dict[str, Any] | None:
         if type(revision) is not int or not 0 <= revision <= 0xFFFFFFFF:
             return None
         sample["radio_revision"] = revision
+    try:
+        for field in INTERVAL_FIELDS:
+            if field in message:
+                sample[field] = _bounded_int(message[field], field, 0, 0xFFFFFFFF)
+    except (TypeError, ValueError, OverflowError):
+        return None
     return sample
 
 

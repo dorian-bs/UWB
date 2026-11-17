@@ -54,8 +54,8 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
 
 - This pass does not build, flash, or revalidate boards. The complete hardware
   chain and any changed RF settings still need explicit lab validation.
-- Ranging defaults to roughly 1 Hz for bring-up. The 0.1-10 Hz command guard is
-  not verified throughput or an accuracy claim.
+- Ranging defaults to roughly 1 Hz for bring-up. The 0.1-50 Hz command guard is
+  the highest rate measured with ≥97% yield, not an accuracy claim.
 - Sample loss at 10 Hz (~55% yield): recordings show contiguous `seq` and
   `telemetry_dropped` 0, so exchanges succeed but start too rarely. Firmware `time_ms`
   runs ~0.55x wall time at 100 ms: blocking 115200-baud UART debug prints inside the
@@ -65,15 +65,29 @@ Usage lives in the [host guide](../host/README.md); interfaces and ownership in
   ~80 ms lost per poll); quiet ISR logs on both boards 98%; all fixes 100%; wall-clock
   scheduling alone 99.7% but ISR duty 81%; quiet on TX only 0% (RX reply latency 12 ms
   exceeds the TX receive timeout, 316 timeouts); quiet on RX only 98%. Baseline yield is
-  71% at 200 ms and 87% at 500 ms. Confirmed. Fix implemented, not yet flashed or measured:
+  71% at 200 ms and 87% at 500 ms. Confirmed. Fix implemented, flashed and verified on
+  hardware (25 s runs): 100% yield at 100/200/500 ms (tick/wall 0.99, ISR duty 3.5%/1.7%/0.7%,
+  RX reply latency 0.8 ms, no timeouts, `log_drop` 0); legacy flags 11 still give 53%.
   `qorvo_log.c` queues every log line (4 KB ring) and the main loop drains it, JSON range
   records get a reserved share and a longer USB wait, debug text is dropped first when full
-  (`log_drop`); TX is scheduled from the DWT cycle counter. `DIAG` flags now re-enable the old
-  behaviour for A/B (1 legacy log, 2 legacy tick, 4 mute text). Verify after flashing with
+  (`log_drop`); TX is scheduled from the DWT cycle counter. Per-exchange narration text is off
+  by default (the range JSON carries the same data plus new `ra_dtu`/`rb_dtu`/`da_dtu`/`db_dtu`
+  intervals); `DIAG 8` turns it back on. `DIAG` flags also re-enable the old behaviour for A/B
+  (1 legacy log, 2 legacy tick, 4 mute text). Verify after flashing with
   `make probe-loss`: expect ~100% yield at 100/200/500 ms for the default and ~55% for
-  legacy log + tick. Still open: ANSWER/FINAL use immediate TX against a 12 ms RX timeout, so
-  check `rx_reply_latency_max_ms`; the UART at 115200 baud cannot carry ~1.2 KB/exchange of
-  debug text at 10 Hz, so some debug lines are dropped by design.
+  legacy log+tick+trace (flags 11). Still open: ANSWER/FINAL use immediate TX against a 12 ms RX
+  timeout, so check `rx_reply_latency_max_ms`; with trace on, the UART at 115200 baud cannot carry
+  ~1.2 KB/exchange at 10 Hz, so some text lines are dropped by design.
+- Above 10 Hz (flashed and measured on USB, 25 s per row, `data/loss_probe/20261117-083557.json`):
+  the firmware `SET` period minimum is 10 ms and the UART to the ESP32 has its own lossy path
+  (whole lines, skipped while busy; `uart_skip`/`uart_skip_json` in the diag line), so USB CDC is
+  never held back by the 115200-baud UART. Exchange success is 100% at every rate with no
+  timeouts and RX reply latency 0.8 ms. Yield: 50 ms 100%, 33 ms 97%, 25 ms 98%, 20 ms 98%,
+  15 ms 96%, 10 ms 85% (ISR duty 7% to 30%; the shortfall is start-to-start period stretch
+  with ms-granularity scheduling, not lost exchanges). The host guard is therefore 50 Hz
+  (20 ms). The UART skips nothing at 50 ms but 195 JSON lines at 33 ms and more below, so the
+  ESP32/TCP path is only complete up to about 20 Hz; use USB for faster runs. The ESP32 path
+  above ~20 Hz was not recorded end to end through the dashboard.
 - Only the initiator publishes ranges. Debug text and JSON share output; full
   CIR snapshots, boot IDs, and firmware build identity are still not recorded.
 - Transport is not fully loss-aware. Parsed recordings cannot recover upstream

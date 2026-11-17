@@ -241,10 +241,10 @@ function radioPayload(fields) {
   const power = String(fields.tx_power ?? "").trim();
   payload.tx_power = /^0x[0-9a-f]{1,8}$/i.test(power) ? Number(power) : NaN;
   if (!TX_POWER_PRESETS.includes(payload.tx_power)) throw new Error("Choose one of the TX power presets.");
-  if (!Number.isFinite(payload.sampling_hz) || payload.sampling_hz < 0.1 || payload.sampling_hz > 10 ||
+  if (!Number.isFinite(payload.sampling_hz) || payload.sampling_hz < 0.1 || payload.sampling_hz > 50 ||
       ![5, 9].includes(payload.channel) || ![64, 128, 256, 512, 1024].includes(payload.preamble) ||
       ![850, 6800].includes(payload.data_rate)) {
-    throw new Error("Choose supported radio settings; requested rate must be 0.1-10 Hz.");
+    throw new Error("Choose supported radio settings; requested rate must be 0.1-50 Hz.");
   }
   return payload;
 }

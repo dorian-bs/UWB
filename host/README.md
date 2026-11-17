@@ -79,13 +79,16 @@ for flashing commands.
 
 The **Radio / sampling** panel offers:
 
-- Requested rate: 0.1-10 Hz (100-10000 ms period).
+- Requested rate: 0.1-50 Hz (20-10000 ms period). Measured on USB: 100% exchange success and
+  ≥97% yield down to 20 ms; 15 ms gives 96% and 10 ms only 85%, so 50 Hz is the cap. The ESP32
+  UART/TCP link (115200 baud, ~35 ms per record) is only complete up to about 20 Hz; above that
+  the firmware skips lines for the UART and only USB (`dual-serial`) carries every sample.
 - Channel: 5 or 9; preamble: 64, 128, 256, 512, or 1024 symbols.
 - Data rate: 850 kbps or 6.8 Mbps.
 - TX power: one of seven preset `TX_POWER` register values, nominally 3 dB apart from the maximum down to -18 dB. They are relative steps, **not calibrated dBm** and not a lab-approved power range.
 
 These are physical radio settings. Demo, replay, TCP, and single-USB modes cannot
-apply them. The 10 Hz guard is not a verified throughput claim; requested rate and
+apply them. The 50 Hz guard is the highest rate measured with ≥97% yield, not a certified throughput claim; requested rate and
 observed successful-sample rate are shown separately.
 The **Sample yield** tile is the observed rate as a percentage of the rate the TX board is configured for;
 the radio panel also shows the share of recent ranging attempts (from the firmware exchange counter) that produced a sample.

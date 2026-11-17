@@ -23,20 +23,27 @@ from typing import Any
 
 # DIAG flag bits, see qorvo_control.h. 0 is the shipped (fixed) behaviour; the bits re-enable
 # the old behaviour so the fix can be A/B tested against it.
-LEGACY_LOG, LEGACY_TICK, MUTE_TEXT = 1, 2, 4
-LEGACY = LEGACY_LOG | LEGACY_TICK
+LEGACY_LOG, LEGACY_TICK, MUTE_TEXT, TRACE = 1, 2, 4, 8
 
-# (name, period_ms, tx_flags, rx_flags): each row isolates one hypothesis.
+# (name, period_ms, tx_flags, rx_flags): each row isolates one hypothesis. The legacy rows add TRACE
+# so that they print the same per-exchange text the old firmware did.
 SCENARIOS: list[tuple[str, int, int, int]] = [
     ("fixed (default)", 100, 0, 0),
-    ("legacy log + tick, both", 100, LEGACY, LEGACY),
-    ("legacy log only, both", 100, LEGACY_LOG, LEGACY_LOG),
-    ("legacy tick only, both", 100, LEGACY_TICK, LEGACY_TICK),
-    ("text lines muted, both", 100, MUTE_TEXT, MUTE_TEXT),
-    ("fixed TX, legacy log RX", 100, 0, LEGACY_LOG),
-    ("legacy log TX, fixed RX", 100, LEGACY_LOG, 0),
+    ("fixed + full trace text", 100, TRACE, TRACE),
+    ("legacy log+tick+trace", 100, LEGACY_LOG | LEGACY_TICK | TRACE, LEGACY_LOG | LEGACY_TICK | TRACE),
+    ("legacy log+trace, both", 100, LEGACY_LOG | TRACE, LEGACY_LOG | TRACE),
+    ("legacy tick+trace, both", 100, LEGACY_TICK | TRACE, LEGACY_TICK | TRACE),
+    ("fixed trace TX, legacy log RX", 100, TRACE, LEGACY_LOG | TRACE),
+    ("legacy log TX, fixed trace RX", 100, LEGACY_LOG | TRACE, TRACE),
     ("fixed (default)", 200, 0, 0),
     ("fixed (default)", 500, 0, 0),
+    ("fixed + full trace text", 200, TRACE, TRACE),
+    ("fixed (default)", 50, 0, 0),
+    ("fixed (default)", 33, 0, 0),
+    ("fixed (default)", 25, 0, 0),
+    ("fixed (default)", 20, 0, 0),
+    ("fixed (default)", 15, 0, 0),
+    ("fixed (default)", 10, 0, 0),
 ]
 
 
@@ -161,6 +168,7 @@ def summarize(
         result["tx_isr_max_ms"] = tx_diag["isr_max_us"] / 1000
         result["tx_log_drop"] = tx_diag.get("log_drop")
         result["tx_log_drop_json"] = tx_diag.get("log_drop_json")
+        result["tx_uart_skip_json"] = tx_diag.get("uart_skip_json")
     if rx_diag:
         result["rx_reply_latency_max_ms"] = rx_diag["reply_lat_max_us"] / 1000
         result["rx_rx_to"] = rx_diag["rx_to"]
@@ -213,6 +221,7 @@ def print_table(rows: list[dict[str, Any]]) -> None:
         ("tx_cdc_drop_json", "{:>5}"),
         ("tx_log_drop", "{:>5}"),
         ("tx_log_drop_json", "{:>5}"),
+        ("tx_uart_skip_json", "{:>5}"),
     ]
     short = [
         "scenario",
@@ -232,6 +241,7 @@ def print_table(rows: list[dict[str, Any]]) -> None:
         "cdc",
         "ldrop",
         "ljson",
+        "uskip",
     ]
     print(" ".join(f"{name:>{max(len(name), 3)}}" if i else f"{name:<30}" for i, name in enumerate(short)))
     for row in rows:

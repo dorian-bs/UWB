@@ -80,7 +80,7 @@ def test_radio_validation_and_period_quantization():
     assert slow.period_ms == 333
     for field, value in [
         ("sampling_hz", 0),
-        ("sampling_hz", 10.01),
+        ("sampling_hz", 50.01),
         ("sampling_hz", float("nan")),
         ("channel", 7),
         ("preamble", 65),
@@ -215,6 +215,12 @@ def test_radio_endpoint_rejects_invalid_settings_before_commands():
     with TestClient(app_module.app) as client:
         response = client.post("/api/radio", json=config().model_dump() | {"sampling_hz": 100})
         assert response.status_code == 422
+
+
+def test_radio_accepts_fifty_hz_as_twenty_ms():
+    radio = radio_module()
+    fast = radio.RadioConfig(sampling_hz=50, channel=9, preamble=128, data_rate=6800, tx_power=0xFEFEFEFE)
+    assert fast.period_ms == 20
 
 
 def test_serial_ack_requires_matching_id_and_valid_board_state():

@@ -49,6 +49,18 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(sample["seq"], 7)
         self.assertAlmostEqual(sample["corrected_m"], 2.10)
 
+    def test_keeps_optional_ds_twr_intervals_and_rejects_bad_ones(self) -> None:
+        message = json.loads(VALID_LINE_V2)
+        message.update(ra_dtu=1_000_000, rb_dtu=1_100_000, da_dtu=900_000, db_dtu=950_000)
+        sample = parse_range_line(json.dumps(message))
+        self.assertEqual(
+            [sample[k] for k in ("ra_dtu", "rb_dtu", "da_dtu", "db_dtu")],
+            [1_000_000, 1_100_000, 900_000, 950_000],
+        )
+        self.assertNotIn("ra_dtu", parse_range_line(VALID_LINE_V2))
+        message["db_dtu"] = -1
+        self.assertIsNone(parse_range_line(json.dumps(message)))
+
     def test_rejects_debug_and_invalid_messages(self) -> None:
         self.assertIsNone(parse_range_line("ds_twr.distance = 2.1 m"))
         self.assertIsNone(parse_range_line('{"type":"range","v":2}'))

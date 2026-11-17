@@ -81,7 +81,7 @@ int main(void)
     drain_all(0);
     assert(cdc_len == (size_t)(accepted_text + 4) * sizeof(text));
 
-    /* A ring that wraps many times stays intact. */
+    /* A ring that wraps many times stays intact on USB; the UART gets whole lines only. */
     clear();
     size_t expected = 0;
     for (int i = 0; i < 400; i++) {
@@ -92,8 +92,15 @@ int main(void)
         if (i % 3 == 0) drain_all(i);
     }
     drain_all(1000);
-    assert(qorvo_log_stats()->drop == 0 && cdc_len == expected && uart_len == expected);
+    assert(qorvo_log_stats()->drop == 0 && cdc_len == expected);
     assert(strstr((char *)cdc, "line 399\r\n") != NULL);
+    assert(uart_len > 0 && uart_len <= expected);
+    {
+        size_t lines = 0;
+        for (size_t i = 0; i < uart_len; i++) lines += uart[i] == '\n';
+        assert(uart[uart_len - 1] == '\n' && uart[uart_len - 2] == '\r');
+        assert(lines + qorvo_log_stats()->uart_skip == 400);
+    }
 
     /* A busy or absent USB host delays a line only briefly, and the UART still gets it. */
     clear();
@@ -123,6 +130,21 @@ int main(void)
     qorvo_log_drain(25);
     assert(!qorvo_log_pending());
     assert(qorvo_log_stats()->cdc_drop == 1 && qorvo_log_stats()->cdc_drop_json == 1);
+
+    /* A slow UART never holds back USB: lines arriving while it is busy skip it, but a JSON record
+     * waits for a text line instead of being skipped. */
+    clear();
+    qorvo_log_enqueue((const uint8_t *)text, sizeof(text), false);
+    qorvo_log_enqueue((const uint8_t *)text, sizeof(text), false);
+    qorvo_log_enqueue((const uint8_t *)"{\"v\":1}\r\n", 9, true);
+    qorvo_log_enqueue((const uint8_t *)"{\"v\":2}\r\n", 9, true);
+    qorvo_log_drain(0);
+    qorvo_log_drain(1);
+    assert(cdc_len == 2 * sizeof(text) && qorvo_log_stats()->uart_skip == 1);
+    drain_all(2);
+    assert(cdc_len == 2 * sizeof(text) + 18);
+    assert(qorvo_log_stats()->uart_skip_json == 0);
+    assert(strstr((char *)uart, "{\"v\":1}") != NULL && strstr((char *)uart, "{\"v\":2}") != NULL);
 
     /* A failing UART abandons that line instead of stalling the queue. */
     clear();

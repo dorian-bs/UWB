@@ -44,7 +44,7 @@ TX_POWER_PRESETS = tuple(int(f"{byte:02X}" * 4, 16) for byte in (0xFE, 0x9E, 0x8
 class RadioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sampling_hz: float = Field(ge=0.1, le=10, allow_inf_nan=False)
+    sampling_hz: float = Field(ge=0.1, le=50, allow_inf_nan=False)
     channel: Literal[5, 9]
     preamble: Literal[64, 128, 256, 512, 1024]
     data_rate: Literal[850, 6800]
@@ -78,7 +78,7 @@ class BoardState(BaseModel):
     board: int = Field(ge=0, le=255)
     role: Literal["tx", "rx"]
     revision: int = Field(ge=0, le=0xFFFFFFFF)
-    period_ms: int = Field(ge=100, le=10000)
+    period_ms: int = Field(ge=20, le=10000)
     channel: Literal[5, 9]
     preamble: Literal[64, 128, 256, 512, 1024]
     data_rate: Literal[850, 6800]

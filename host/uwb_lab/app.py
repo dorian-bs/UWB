@@ -292,6 +292,10 @@ async def replay_source() -> AsyncIterator[str]:
                         "ipatov_fp_index",
                         "ipatov_accum_count",
                         "cia_diag1",
+                        "ra_dtu",
+                        "rb_dtu",
+                        "da_dtu",
+                        "db_dtu",
                     ):
                         if optional_key in message:
                             compact[optional_key] = message[optional_key]
